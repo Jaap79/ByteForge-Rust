@@ -12,3 +12,9 @@ desktop.ini
 # Keep the current release binary, ignore ad-hoc local binaries.
 *.exe
 !dist/Byteforge.exe
+!dist/ByteForge-Rust.exe
+!legacy/Byteforge.exe
+/target/
+/.tooling/
+/output/
+*.bfs

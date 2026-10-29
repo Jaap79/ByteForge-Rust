@@ -1,5 +1,14 @@
 # Changelog
 
+## Rust edition 1.1.0
+
+- Local fork of FASM baseline a401721 with native Win32/RichEdit UI in Rust.
+- Colored tabs, independent undo, font/size, zoom, wrap, selection, scrolling and highlights.
+- Autosaved recoverable sessions including unsaved scratch tabs; crash/restart recovery, previous-copy fallback, disable/clear controls and concurrent-writer protection.
+- All-tab search with logical line previews, selectable results, case option and replacing; original editing, checksums, file info, hex preview and shortcuts retained.
+- Atomic file writes, external-disk-change detection, embedded icon/version resource and complete dark/light palette.
+- Original assembler and executable retained under legacy/; original repository unchanged.
+
 ## 1.0 RC2 beta 9
 
 - Added right-click editor context menu with Cut, Copy, Paste and Find More.

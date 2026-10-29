@@ -1,73 +1,74 @@
-# ByteForge
+# ByteForge Rust 1.1.0
 
-Small and fast text editor without fluff.
+Native Windows text editor with colored tabs, independent tab settings, cross-tab search and session recovery. This is a local Rust fork of ByteForge 1.0.0.10 at `a401721`; the original FASM repository is unchanged. Original source and binary are retained in `legacy/` and the Git history is preserved.
 
-ByteForge is a compact Win32 Unicode text editor written in pure FASM. It is built as a single native Windows executable with no CRT and no bundled external parser/runtime components.
+Run **`dist/ByteForge-Rust.exe`**. One executable is distributed; only standard Windows DLLs are needed. No browser, WebView, .NET, sidecar icon or installed Rust runtime is required.
 
-## Current Version
+## Tabs and editing
 
-- Product: ByteForge
-- Version: 1.0 RC2 beta 9
-- Source: `src/ByteForge.asm`
-- Current build: `dist/Byteforge.exe`
+Each tab has its own document, undo/redo buffer, file path, encoding, line endings, color, font family/size, zoom, word wrap, selection, scroll position and highlights. Untitled scratch tabs have unique names. Open, command-line files and drag/drop open additional tabs; reopening a path selects its existing tab. Closing an unsaved tab asks Save/Discard/Cancel.
 
-## Highlights
+UTF-8, UTF-8 BOM, UTF-16LE BOM and UTF-16BE BOM are supported. Encoding and CRLF/LF/CR preference are preserved on save. Invalid Unicode and binary/NUL-containing input are rejected without replacing an open document. Plain-text files never receive highlight/font metadata. MD5/SHA-256 comparison, file info, jump-to-line, clipboard editing and hex preview are retained. The hex preview shows the active buffer's encoded bytes, limited to 64 KiB.
 
-- Native Win32 GUI text editor using RichEdit.
-- Unicode command-line parsing via `GetCommandLineW` and `CommandLineToArgvW`.
-- File association / Open With / Explorer startup file support.
-- Drag & Drop, File Open, Open With and Explorer startup all share the same open path.
-- UTF-8, UTF-16LE and UTF-16BE BOM detection.
-- CRLF, LF and CR line-ending detection.
-- Dark editor theme.
-- Hex viewer with synchronized search and jump behavior.
-- MD5 and SHA-256 checksum dialog with optional expected-hash comparison.
-- File Info dialog with path, format, line/character counts, modified state and checksums.
-- Manual Help -> Check for Updates via the public `version.json` in this repository.
-- Text zoom via Ctrl+Plus, Ctrl+Minus and Reset Zoom.
-- Jump to line/character.
-- Right-click editor menu with Cut, Copy, Paste and Find More.
-- Selection highlighter with red, orange, yellow and green colors.
-- Unsaved-change prompts before New, Open, Drag & Drop and Exit.
-- Brand-new empty documents do not prompt for saving unless text was actually entered.
+## Search
 
-## Build
+`Ctrl+F` opens the search/replace panel for the current tab. `Ctrl+Shift+F` searches **all open tabs**, including unsaved buffers. Enable Match case if needed. Press Enter or Find all to list matches with tab name, logical line number and preview. Double-click a result or focus it and press Enter to activate that tab and select the match; F3 cycles results. Wrapped/hidden tabs use logical file lines, not screen rows. Editing invalidates old result offsets. Replace all asks for confirmation and works in the selected scope; each tab retains its own undo history. Search results are capped at 10,000; refine searches reaching that cap before Replace all.
 
-ByteForge is built with flat assembler for Windows.
+## Session recovery
+
+Recovery is enabled by default. Snapshots include unsaved scratch text, modified file buffers, tab order/active tab, tab appearance, highlight ranges, selection and scroll. They are updated about every 1.5 seconds and on normal exit/Windows shutdown. With recovery enabled, exiting retains unsaved buffers instead of asking to save every tab. Closing an individual unsaved tab still asks.
+
+Recovery files live in **`%LOCALAPPDATA%\ByteForge-Rust`**:
+
+- `session.bfs`: current bounded, checksummed snapshot.
+- `session.previous.bfs`: previous valid snapshot, used if the current one is damaged.
+- `session.lock`: exclusively opened while the session is running; prevents concurrent writers.
+- `recovery.off`: remembers the user's disabled-recovery preference.
+
+Recovery text is **not encrypted**. Tools → Session recovery disables it and removes stored snapshots. Tools → Clear recovery data also removes snapshots and disables recovery, retaining open tabs and real saved files. If recovery is disabled, exit asks Save/Discard/Cancel for unsaved documents. Undo histories survive tab switching in the running process but are not restored after restart.
+
+Recovery restores buffer contents without overwriting source files. A SHA-256 of the original disk bytes is retained. Saving a file changed/deleted on disk prompts Overwrite/Save copy/Cancel. A damaged current snapshot falls back to the previous copy; if both are damaged, existing files are retained and recovery writes pause until recovery data is explicitly cleared. Writes use flush + atomic Windows replacement. A crash may lose the last autosave interval; no application can guarantee recovery of bytes not yet written during power loss.
+
+To use an isolated workspace: `ByteForge-Rust.exe --session-dir "C:\path\workspace"`. One instance may own each workspace. The first release limits documents to 32 MiB, sessions to 128 MiB and open tabs to 128.
+
+## Keyboard shortcuts
+
+All menu actions show their shortcuts. Important mappings:
+
+| Action | Shortcut |
+|---|---|
+| New / Open / Save | Ctrl+N / Ctrl+O / Ctrl+S |
+| Save as / Save all | Ctrl+Shift+S / Ctrl+Alt+S |
+| Close tab / Exit | Ctrl+W / Alt+F4 |
+| Next / Previous tab | Ctrl+Tab / Ctrl+Shift+Tab |
+| Move tab left / right | Ctrl+Alt+Left / Right |
+| Tab color (default/red/orange/yellow/green/blue/purple) | Ctrl+Alt+0–6 |
+| Highlight red/orange/yellow/green | Ctrl+1–4 |
+| Remove selection highlight | Ctrl+0 |
+| Find / All tabs / Next / Selection | Ctrl+F / Ctrl+Shift+F / F3 / Ctrl+F3 |
+| Replace / Jump / File info | Ctrl+H / Ctrl+G / Ctrl+I |
+| Dark/light mode / Word wrap | Ctrl+D / Alt+Z |
+| Zoom in / out / reset | Ctrl++ / Ctrl+- / Ctrl+Shift+0 |
+| Default / Segoe UI / Georgia / Consolas | Ctrl+Shift+1–4 |
+| Choose font and size | Ctrl+Shift+P |
+| Hex left / right / below / close | Ctrl+Shift+L / R / B / X |
+| Checksums | Ctrl+K |
+| Session recovery / Clear recovery data | Ctrl+Alt+P / Ctrl+Alt+Delete |
+| Manual FASM upstream check / About | Ctrl+U / F1 |
+
+Ctrl+W now closes a tab; word wrap moved to Alt+Z. The manual upstream check explicitly reports the FASM feed; this local Rust fork does not pretend that the FASM version is a Rust update. No automatic network requests or telemetry.
+
+## Build and verify
+
+Rust Windows GNU toolchain; one pinned dependency, `windows-sys = 0.59.0`. `build.rs` embeds the geometric ByteForge-family icon, DPI manifest and Windows version resource without a resource compiler. Version: 1.1.0 / PE 1.1.0.0.
 
 ```powershell
-.\scripts\build.ps1
+.\scripts\build.ps1 -Test -Clippy
+.\tests\ui-smoke.ps1
 ```
 
-By default the script expects FASM at:
+The build helper reuses the existing sibling `CSVcoder-Rust\.tooling` installation if present, or accepts `-ToolingRoot`; otherwise it uses Cargo on PATH. It changes only the current process environment. Dependencies must already be cached for its offline build; on a fresh toolchain run `cargo fetch --locked` once. With a normal configured toolchain, `cargo test --locked` and `cargo build --release --locked` work directly.
 
-```text
-C:\LOOT\FASM\FASM.EXE
-```
+Native integration tests run in an isolated session directory, apply real RichEdit formatting, exercise tabs/search/save/undo/redo, forcibly terminate the process after a snapshot, and start a second process to verify recovered live controls. Tests also launch with a system-only PATH to verify no development-toolchain DLL is needed. The original FASM application and its open documents are never controlled by these tests.
 
-To use another location:
-
-```powershell
-.\scripts\build.ps1 -FasmPath "C:\path\to\FASM.EXE"
-```
-
-## Repository Layout
-
-```text
-src/                  FASM source
-dist/                 Current beta executable
-docs/                 Notes, changelog and release checklist
-scripts/              Local build helpers
-```
-
-## Status
-
-Release Candidate 2 beta 8.
-
-## Reporting Bugs and Security Issues
-
-Please report bugs and security-related issues to:
-
-```text
-jaapengel79@proton.me
-```
+Source: `src/document.rs`, `src/session.rs`, `src/storage.rs`, `src/ui/`. Recovery format and invariants: [architecture notes](docs/ARCHITECTURE.md). Licence remains the inherited private-beta licence in `LICENSE.md`.

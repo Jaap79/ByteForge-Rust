@@ -1,6 +1,7 @@
 {
-  "version": "1.0.0.10",
-  "display": "ByteForge 1.0 RC2 beta 9",
-  "url": "https://github.com/Jaap79/ByteForge/releases/latest",
-  "notes": "https://github.com/Jaap79/ByteForge/blob/main/docs/CHANGELOG.md"
+  "version": "1.1.0.0",
+  "display": "ByteForge Rust 1.1.0",
+  "edition": "rust",
+  "channel": "local-preview",
+  "baseline": "a40172166ef08700da2abd4cafa4629dc2433c76"
 }

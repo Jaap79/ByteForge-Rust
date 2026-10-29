@@ -1,42 +1,12 @@
-# Release Checklist
+# Rust edition release checklist
 
-## 1.0 RC2 beta 9 Checks
-
-- [ ] Open empty document.
-- [ ] Close a brand-new empty document and confirm no save prompt appears.
-- [ ] Type in a new document and confirm New/Open/Exit prompts for saving.
-- [ ] Open UTF-8 file with BOM.
-- [ ] Open UTF-8 file without BOM.
-- [ ] Open UTF-16LE file.
-- [ ] Open UTF-16BE file.
-- [ ] Save and Save As.
-- [ ] Open via Explorer association.
-- [ ] Open via Open With.
-- [ ] Drag & Drop file onto window.
-- [ ] Search forward and upward in main editor.
-- [ ] Confirm hex viewer follows search selection.
-- [ ] Select text, right-click, and confirm Cut/Copy/Paste/Find More menu items appear.
-- [ ] Confirm right-click menu shows Paste but no Highlight submenu when there is no selection.
-- [ ] Confirm Find More opens Find with the selected text filled in.
-- [ ] Confirm Edit -> Highlight is greyed out when no text is selected.
-- [ ] Confirm Edit -> Highlight supports Red, Orange, Yellow and Green when text is selected.
-- [ ] Confirm right-click Highlight submenu supports Red, Orange, Yellow and Green when text is selected.
-- [ ] Jump to line/character near beginning, middle and end of file.
-- [ ] Confirm hex viewer follows Jump to line/character.
-- [ ] Compare matching MD5 and SHA-256.
-- [ ] Compare mismatching MD5 and SHA-256.
-- [ ] Confirm File Info values and colors.
-- [ ] Test text zoom in/out/reset.
-- [ ] Confirm New/Open/Drag & Drop/Exit prompts to save unsaved changes.
-- [ ] Resize hex viewer left/right/below.
-- [ ] Verify executable name is `Byteforge.exe`.
-- [ ] Verify executable VersionInfo in Explorer.
-- [ ] Verify About dialog shows `ByteForge 1.0 RC2 beta 9`.
-- [ ] Verify About dialog shows `jaapengel79@proton.me`.
-- [ ] Verify Help -> Check for Updates reports the current release correctly.
-
-## Build Command
-
-```powershell
-.\scripts\build.ps1
-```
+- Run `scripts/build.ps1 -Test -Clippy` (format check, unit tests, Clippy with warnings denied, release build).
+- Run `tests/ui-smoke.ps1` (isolated native controls plus forced termination/restart recovery).
+- Verify PE FileVersion/ProductVersion and package version agree.
+- Inspect dark and light modes, popup menu, search/results, colored tabs and a dialog; verify title-bar colors and readable controls.
+- Verify all menu commands have unique keyboard mappings; confirm find/replace fields retain native clipboard/select-all shortcuts.
+- Check only the active editor is visible after snapshots/theme switches.
+- Verify executable launch with system-only PATH, no bundled runtime DLLs.
+- Keep the original FASM repository untouched and retain its baseline in `legacy/`.
+- Do not publish the Rust edition as a FASM update. Set up a distinct release/feed before enabling Rust update comparisons.
+- Record tested build SHA-256 and evidence in `docs/VALIDATION.md`.
