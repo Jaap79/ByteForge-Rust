@@ -14,7 +14,7 @@ impl Drop for HttpHandle {
 pub fn upstream_version() -> Result<String, String> {
     unsafe {
         let session = HttpHandle(WinHttpOpen(
-            wide("ByteForge-Rust/1.1.0 manual upstream check").as_ptr(),
+            wide("ByteForge-Rust/1.1.1 manual upstream check").as_ptr(),
             WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
             null(),
             null(),

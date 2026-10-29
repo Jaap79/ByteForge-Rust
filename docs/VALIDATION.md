@@ -1,4 +1,17 @@
-# Validation — ByteForge Rust 1.1.0
+# Validation — ByteForge Rust 1.1.1
+
+## Current patch build
+
+- New editors immediately receive the current theme background and foreground after font initialization. Covers New, Open and recovery creation.
+- Tab color stripes are 8 logical pixels on the active tab and 6 on inactive tabs; both render paths share the same sizing rule and DPI scaling.
+- Size: 462,848 bytes; Windows FileVersion / ProductVersion: `1.1.1.0`.
+- SHA-256: `2306E20B1AABDC3035523A8B46E5C77CDE9D09B802F2429F260E3E14981EDFA5`.
+- Format, Clippy (warnings denied), release build, seven model/storage tests, **44 native UI checks** and **nine process-stop/restart checks** passed.
+- Regression tests read back the actual RichEdit background and default foreground immediately after new tab creation in dark mode, light mode and after switching back.
+- Computer Use screenshots confirm freshly created blank tabs use dark/light backgrounds immediately and the thicker color stripes are clearly visible in both modes. The existing design-language palette is preserved.
+- Local evidence: `output/qa-20261029-204126-482/checks.txt`, `result.txt`, `restart/result.txt`.
+
+## Original 1.1.0 validation
 
 Validated on Windows x64, 29 October 2026. FASM baseline remains a401721 with a clean original worktree.
 

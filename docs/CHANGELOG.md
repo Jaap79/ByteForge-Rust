@@ -1,5 +1,11 @@
 # Changelog
 
+## Rust edition 1.1.1
+
+- Apply the current dark/light editor background immediately when creating any tab, including New and Open.
+- Increase tab color stripes to 8 logical pixels for the active tab and 6 for inactive tabs, scaled with DPI.
+- Add native regression checks for new tabs in dark/light mode and after switching back, including readable default text.
+
 ## Rust edition 1.1.0
 
 - Local fork of FASM baseline a401721 with native Win32/RichEdit UI in Rust.

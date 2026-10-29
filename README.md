@@ -1,4 +1,4 @@
-# ByteForge Rust 1.1.0
+# ByteForge Rust 1.1.1
 
 Native Windows text editor with colored tabs, independent tab settings, cross-tab search and session recovery. This is a local Rust fork of ByteForge 1.0.0.10 at `a401721`; the original FASM repository is unchanged. Original source and binary are retained in `legacy/` and the Git history is preserved.
 
@@ -60,7 +60,7 @@ Ctrl+W now closes a tab; word wrap moved to Alt+Z. The manual upstream check exp
 
 ## Build and verify
 
-Rust Windows GNU toolchain; one pinned dependency, `windows-sys = 0.59.0`. `build.rs` embeds the geometric ByteForge-family icon, DPI manifest and Windows version resource without a resource compiler. Version: 1.1.0 / PE 1.1.0.0.
+Rust Windows GNU toolchain; one pinned dependency, `windows-sys = 0.59.0`. `build.rs` embeds the geometric ByteForge-family icon, DPI manifest and Windows version resource without a resource compiler. Version: 1.1.1 / PE 1.1.1.0.
 
 ```powershell
 .\scripts\build.ps1 -Test -Clippy

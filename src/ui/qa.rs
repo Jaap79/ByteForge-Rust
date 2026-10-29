@@ -202,6 +202,46 @@ unsafe fn exercise(app: &mut App, output: &Path) -> Result<usize, String> {
         "First tab owns font zoom color"
     );
     app.command(NEW);
+    check!(
+        SendMessageW(app.edit(), 0x443, 0, palette().control as isize) as u32 == palette().control,
+        "New tab immediately uses the dark editor background"
+    );
+    // A mode change followed by another creation must inherit the mode without
+    // relying on a subsequent apply_theme call to repair the new editor.
+    app.command(DARK_MODE);
+    app.command(NEW);
+    check!(
+        SendMessageW(app.edit(), 0x443, 0, palette().control as isize) as u32 == palette().control,
+        "New tab immediately uses the light editor background"
+    );
+    let mut cf: CharFormat = zeroed();
+    cf.size = size_of::<CharFormat>() as u32;
+    SendMessageW(app.edit(), 0x43a, 0, &mut cf as *mut _ as isize);
+    check!(
+        cf.color == palette().text,
+        format!(
+            "New light tab has readable default text (color={:#x}, mask={:#x}, effects={:#x})",
+            cf.color, cf.mask, cf.effects
+        )
+    );
+    check!(app.close_tab(), "Empty themed test tab closes cleanly");
+    app.command(DARK_MODE);
+    app.command(NEW);
+    check!(
+        SendMessageW(app.edit(), 0x443, 0, palette().control as isize) as u32 == palette().control,
+        "New tab inherits dark mode after switching back"
+    );
+    let mut cf: CharFormat = zeroed();
+    cf.size = size_of::<CharFormat>() as u32;
+    SendMessageW(app.edit(), 0x43a, 0, &mut cf as *mut _ as isize);
+    check!(
+        cf.color == palette().text,
+        format!(
+            "New dark tab has readable default text (color={:#x}, mask={:#x}, effects={:#x})",
+            cf.color, cf.mask, cf.effects
+        )
+    );
+    check!(app.close_tab(), "Extra dark test tab closes cleanly");
     set_raw(app.edit(), "second tab\nNEEDLE second\n😀 needle third");
     app.documents[1].changed = true;
     app.capture(1);

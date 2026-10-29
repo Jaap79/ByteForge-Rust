@@ -75,6 +75,13 @@ const DO_REPLACE_ALL: u16 = 414;
 const INIT: u32 = WM_APP + 1;
 const RUN_QA: u32 = WM_APP + 2;
 const ACTIVE_TAB: u32 = WM_APP + 3;
+fn tab_stripe_height(active: bool) -> i32 {
+    if active {
+        8
+    } else {
+        6
+    }
+}
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 thread_local! {static APP:RefCell<Option<App>>=const{RefCell::new(None)};}
 struct Tab {
@@ -182,7 +189,7 @@ pub fn run() {
         let hwnd = CreateWindowExW(
             WS_EX_ACCEPTFILES,
             class.as_ptr(),
-            wide("ByteForge Rust 1.1.0").as_ptr(),
+            wide("ByteForge Rust 1.1.1").as_ptr(),
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -577,7 +584,7 @@ unsafe extern "system" fn tab_proc(
                 left: r.left + 1,
                 top: r.top + 1,
                 right: r.right - 1,
-                bottom: r.top + s(if selected { 4 } else { 2 }),
+                bottom: r.top + s(tab_stripe_height(selected)),
             };
             FillRect(dc, &stripe, b);
             DeleteObject(b);
@@ -822,6 +829,9 @@ impl App {
         );
         self.next_control += 1;
         ShowWindow(edit, SW_HIDE);
+        // RichEdit starts with a system-white background; apply the current mode
+        // before the editor is populated or activated (also covers Open/restore).
+        SendMessageW(edit, 0x443, 0, palette().control as isize);
         SendMessageW(edit, 0x435, 0, document::MAX_DOCUMENT as isize);
         SendMessageW(edit, 0x445, 0, 1); // EM_SETEVENTMASK: ENM_CHANGE
         set_raw(edit, &doc.text);
@@ -864,6 +874,9 @@ impl App {
         });
         self.invalidate_results();
         self.apply_font(self.documents.len() - 1);
+        // WM_SETFONT can restore RichEdit's automatic/default foreground. Apply
+        // theme text colors afterwards, preserving restored highlight ranges.
+        recolor_raw(edit);
         self.set_wrap(self.documents.len() - 1);
         let scroll = self.documents.last().unwrap().doc.scroll;
         let pt = POINT {
@@ -1008,7 +1021,7 @@ impl App {
                 self.update = None;
                 match result {
                     Ok(v) => {
-                        prompt(self.hwnd,"Upstream version",&format!("Rust edition: 1.1.0\nFASM upstream: {v}\n\nThis is the original FASM feed, not an update channel for this Rust edition.\nhttps://github.com/Jaap79/ByteForge"),None,&["OK"]);
+                        prompt(self.hwnd,"Upstream version",&format!("Rust edition: 1.1.1\nFASM upstream: {v}\n\nThis is the original FASM feed, not an update channel for this Rust edition.\nhttps://github.com/Jaap79/ByteForge"),None,&["OK"]);
                     }
                     Err(e) => error(self.hwnd, &e),
                 }
@@ -1026,7 +1039,7 @@ impl App {
         set_text(
             self.hwnd,
             &format!(
-                "{}{} — ByteForge Rust 1.1.0",
+                "{}{} — ByteForge Rust 1.1.1",
                 if tab.doc.dirty { "* " } else { "" },
                 path
             ),
@@ -1201,7 +1214,7 @@ impl App {
         FillRect(d.hDC, &d.rcItem, brush(if active { 3 } else { 1 }));
         let color = CreateSolidBrush(rgb(TAB_COLORS[t.doc.color as usize].1));
         let mut stripe = d.rcItem;
-        stripe.bottom = stripe.top + self.scale(if active { 4 } else { 2 });
+        stripe.bottom = stripe.top + self.scale(tab_stripe_height(active));
         FillRect(d.hDC, &stripe, color);
         DeleteObject(color);
         let mut r = d.rcItem;
@@ -1931,7 +1944,7 @@ impl App {
                 }
             }
             ABOUT => {
-                prompt(self.hwnd,"About ByteForge Rust","ByteForge Rust 1.1.0\nNative Win32 / RichEdit — Rust edition\nForked from ByteForge 1.0.0.10 (a401721).\n\nTabs, independent formatting, cross-tab search and crash recovery.\nRecovery stores readable text in your local profile.\n\nBugs / security: jaapengel79@proton.me",None,&["OK"]);
+                prompt(self.hwnd,"About ByteForge Rust","ByteForge Rust 1.1.1\nNative Win32 / RichEdit — Rust edition\nForked from ByteForge 1.0.0.10 (a401721).\n\nTabs, independent formatting, cross-tab search and crash recovery.\nRecovery stores readable text in your local profile.\n\nBugs / security: jaapengel79@proton.me",None,&["OK"]);
             }
             423 | 424 => self.invalidate_results(),
             _ => {}
