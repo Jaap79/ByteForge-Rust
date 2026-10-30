@@ -56,4 +56,4 @@ The shared design-language skill guided the semantic palette, full-control repai
 - Snapshots update every approximately 1.5 seconds. Force termination/power loss can lose changes made since the last successful snapshot.
 - Recovery text is readable local data, not encrypted. Disable/clear commands are included and documented.
 - Limits: 128 tabs, 32 MiB per document, 128 MiB per snapshot and 10,000 listed search hits. Replace all refuses a capped result set.
-- The Rust edition is a local fork, not a published GitHub release. Its manual upstream query identifies the original FASM feed explicitly; no Rust update channel is configured.
+- The Rust edition is maintained in the separate `Jaap79/ByteForge-Rust` repository. The preview executable is tracked under `dist/`; no GitHub Release or Rust update channel is configured. Its manual upstream query still identifies the original FASM feed explicitly.

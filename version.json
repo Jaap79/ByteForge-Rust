@@ -2,6 +2,7 @@
   "version": "1.1.2.0",
   "display": "ByteForge Rust 1.1.2",
   "edition": "rust",
-  "channel": "local-preview",
+  "channel": "preview",
+  "repository": "https://github.com/Jaap79/ByteForge-Rust",
   "baseline": "a40172166ef08700da2abd4cafa4629dc2433c76"
 }

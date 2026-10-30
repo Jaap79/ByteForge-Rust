@@ -1,6 +1,8 @@
 # ByteForge Rust 1.1.2
 
-Native Windows text editor with colored tabs, independent tab settings, cross-tab search and session recovery. This is a local Rust fork of ByteForge 1.0.0.10 at `a401721`; the original FASM repository is unchanged. Original source and binary are retained in `legacy/` and the Git history is preserved.
+Native Windows text editor with colored tabs, independent tab settings, cross-tab search and session recovery. This is a separate Rust edition forked from ByteForge 1.0.0.10 at `a401721`; the original FASM repository is unchanged. Original source and binary are retained in `legacy/` and the Git history is preserved.
+
+Repository: [Jaap79/ByteForge-Rust](https://github.com/Jaap79/ByteForge-Rust). The current executable is included under `dist/`; this preview does not yet have a separate GitHub Release or automatic Rust update feed.
 
 Run **`dist/ByteForge-Rust.exe`**. One executable is distributed; only standard Windows DLLs are needed. No browser, WebView, .NET, sidecar icon or installed Rust runtime is required.
 
@@ -58,7 +60,7 @@ All menu actions show their shortcuts. Important mappings:
 | Session recovery / Clear recovery data | Ctrl+Alt+P / Ctrl+Alt+Delete |
 | Manual FASM upstream check / About | Ctrl+U / F1 |
 
-Ctrl+W now closes a tab; word wrap moved to Alt+Z. The manual upstream check explicitly reports the FASM feed; this local Rust fork does not pretend that the FASM version is a Rust update. No automatic network requests or telemetry.
+Ctrl+W now closes a tab; word wrap moved to Alt+Z. The manual upstream check explicitly reports the FASM feed; this Rust edition does not treat the FASM version as a Rust update. No automatic network requests or telemetry.
 
 ## Build and verify
 
