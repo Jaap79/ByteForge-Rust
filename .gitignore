@@ -13,6 +13,7 @@ desktop.ini
 *.exe
 !dist/Byteforge.exe
 !dist/ByteForge-Rust.exe
+!dist/ByteForge-Rust-1.1.3.exe
 !legacy/Byteforge.exe
 /target/
 /.tooling/

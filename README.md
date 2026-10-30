@@ -1,18 +1,30 @@
-# ByteForge Rust 1.1.2
+# ByteForge Rust 1.2.0
 
 Native Windows text editor with colored tabs, independent tab settings, cross-tab search and session recovery. This is a separate Rust edition forked from ByteForge 1.0.0.10 at `a401721`; the original FASM repository is unchanged. Original source and binary are retained in `legacy/` and the Git history is preserved.
 
 Repository: [Jaap79/ByteForge-Rust](https://github.com/Jaap79/ByteForge-Rust). The current executable is included under `dist/`; this preview does not yet have a separate GitHub Release or automatic Rust update feed.
 
-Run **`dist/ByteForge-Rust.exe`**. One executable is distributed; only standard Windows DLLs are needed. No browser, WebView, .NET, sidecar icon or installed Rust runtime is required.
+Run **`dist/ByteForge-Rust.exe`** (1.2.0). Close any old instance before opening the new one with the same recovery workspace. One self-contained executable; only standard Windows DLLs are needed. No browser, WebView, .NET, PowerShell installation, sidecar grammar files or installed Rust runtime is required.
 
 ## Tabs and editing
 
 Each tab has its own document, undo/redo buffer, file path, encoding, line endings, color, font family/size, zoom, word wrap, selection, scroll position and highlights. Untitled scratch tabs have unique names. Open, command-line files and drag/drop open additional tabs; reopening a path selects its existing tab. Closing an unsaved tab asks Save/Discard/Cancel.
 
+The **+** directly after the last tab opens a blank tab; each tab has its own **×** close target. Drag a tab to change the order; the orange insertion marker previews its destination. Moving retains the editor, contents, selection, undo/redo, font, color and context. Ctrl+Alt+Left/Right also reorders tabs. When tabs overflow, native scroll arrows remain available and the plus stays reachable. Right-click any tab for **Tabkleur** and **Tabblad sluiten**, without switching away from the current document. The palette has eleven choices, including Cyan, Pink, Teal and Gray. Editor right-click actions group highlight colors and removal under **Tekstmarkering**.
+
 UTF-8, UTF-8 BOM, UTF-16LE BOM and UTF-16BE BOM are supported. Encoding and CRLF/LF/CR preference are preserved on save. Invalid Unicode and binary/NUL-containing input are rejected without replacing an open document. Plain-text files never receive highlight/font metadata. MD5/SHA-256 comparison, file info, jump-to-line, clipboard editing and hex preview are retained. The hex preview shows the active buffer's encoded bytes, limited to 64 KiB, and updates as you edit, undo or replace text. Its independent 9pt monospace font keeps the columns aligned when tab fonts change. Labeled panes adapt to left/right/below layout, and hex rows use 4, 8 or 16 bytes according to the available width.
 
 Text follows the active theme after font changes: light in dark mode, dark in light mode. Highlight backgrounds have deeper shades in dark mode so light letters remain readable; the original logical highlight colors are retained in session storage.
+
+## Syntax context — per tab
+
+Choose **Tools → Context (this tab)**: **Plain text**, **PowerShell**, **JSON**, **YAML**, **XML / HTML** or **INI / config**. New tabs start as Plain text; context is chosen explicitly, stays independent per tab and is restored with the session. Ctrl+Alt+Shift+0–5 selects the corresponding context.
+
+PowerShell distinguishes keywords, function/command names, parameters, variables, member access, types, numbers, comments, quoted strings and here-strings; multiline state is retained. JSON distinguishes property names, strings, literals, numbers and delimiters. The other contexts cover configuration keys/values, sections, tags, attributes, comments and YAML block scalars. These are tolerant lexical display modes, not full semantic parsers, validators, code folding or language servers; XML/HTML does not include embedded JavaScript/CSS grammars. No scripts are run and nothing is sent to a service.
+
+Separate syntax palettes provide at least 4.5:1 contrast on the dark/light editor backgrounds. Manual text-highlight backgrounds take priority, using the theme's default foreground so marks stay readable. Returning to Plain text removes syntax foregrounds, not manual marks or fonts. Syntax changes do not change file contents, dirty state, caret/selection, scrolling or undo/redo history.
+
+Typing is debounced by 120 ms. A line-state cache reuses unchanged syntax until multiline state converges; native foreground formatting is limited to the visible viewport and refreshed on scroll. No extra dependency is added.
 
 ## Search
 
@@ -47,6 +59,8 @@ All menu actions show their shortcuts. Important mappings:
 | Next / Previous tab | Ctrl+Tab / Ctrl+Shift+Tab |
 | Move tab left / right | Ctrl+Alt+Left / Right |
 | Tab color (default/red/orange/yellow/green/blue/purple) | Ctrl+Alt+0–6 |
+| Tab color (cyan/pink/teal/gray) | Ctrl+Alt+7 / 8 / 9 / G |
+| Context: Plain / PowerShell / JSON / YAML / XML / INI | Ctrl+Alt+Shift+0–5 |
 | Highlight red/orange/yellow/green | Ctrl+1–4 |
 | Remove selection highlight | Ctrl+0 |
 | Find / All tabs / Next / Selection | Ctrl+F / Ctrl+Shift+F / F3 / Ctrl+F3 |
@@ -64,11 +78,18 @@ Ctrl+W now closes a tab; word wrap moved to Alt+Z. The manual upstream check exp
 
 ## Build and verify
 
-Rust Windows GNU toolchain; one pinned dependency, `windows-sys = 0.59.0`. `build.rs` embeds the geometric ByteForge-family icon, DPI manifest and Windows version resource without a resource compiler. Version: 1.1.2 / PE 1.1.2.0.
+Rust Windows GNU toolchain; one pinned dependency, `windows-sys = 0.59.0`. `build.rs` embeds the geometric ByteForge-family icon, DPI manifest and Windows version resource without a resource compiler. Version: 1.2.0 / PE 1.2.0.0.
 
 ```powershell
 .\scripts\build.ps1 -Test -Clippy
 .\tests\ui-smoke.ps1
+```
+
+For a side-by-side build while the default executable is running:
+
+```powershell
+.\scripts\build.ps1 -Test -Clippy -Output dist\ByteForge-Rust-1.2.0.exe
+.\tests\ui-smoke.ps1 -Executable .\dist\ByteForge-Rust-1.2.0.exe
 ```
 
 The build helper reuses the existing sibling `CSVcoder-Rust\.tooling` installation if present, or accepts `-ToolingRoot`; otherwise it uses Cargo on PATH. It changes only the current process environment. Dependencies must already be cached for its offline build; on a fresh toolchain run `cargo fetch --locked` once. With a normal configured toolchain, `cargo test --locked` and `cargo build --release --locked` work directly.

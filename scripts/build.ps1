@@ -1,4 +1,4 @@
-param([switch]$Test,[switch]$Debug,[switch]$Clippy,[string]$ToolingRoot)
+param([switch]$Test,[switch]$Debug,[switch]$Clippy,[string]$ToolingRoot,[string]$Output='dist\ByteForge-Rust.exe')
 $ErrorActionPreference='Stop'
 $projectRoot=Split-Path -Parent $PSScriptRoot
 if(-not $ToolingRoot){$ToolingRoot=Join-Path $projectRoot '..\CSVcoder-Rust\.tooling'}
@@ -21,7 +21,9 @@ try{
     if(-not $Debug){$buildArgs+='--release';$profile='release'}
     & $cargo @buildArgs; if($LASTEXITCODE){throw 'Build failed'}
     New-Item -ItemType Directory -Path dist -Force|Out-Null
-    Copy-Item "target\$profile\ByteForge-Rust.exe" dist\ByteForge-Rust.exe
-    Get-Item dist\ByteForge-Rust.exe|Select-Object FullName,Length
-    Get-FileHash dist\ByteForge-Rust.exe -Algorithm SHA256|Format-List
+    $outputPath=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Output)
+    New-Item -ItemType Directory -Path (Split-Path -Parent $outputPath) -Force|Out-Null
+    Copy-Item "target\$profile\ByteForge-Rust.exe" -Destination $outputPath
+    Get-Item $outputPath|Select-Object FullName,Length
+    Get-FileHash $outputPath -Algorithm SHA256|Format-List
 }finally{Pop-Location}

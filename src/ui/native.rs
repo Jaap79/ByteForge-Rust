@@ -269,7 +269,7 @@ pub unsafe fn measure_menu(lp: isize) -> isize {
     let dpi = GetDeviceCaps(hdc, LOGPIXELSX as i32) as u32;
     let scale = |n: i32| (n as i64 * dpi as i64 / 96) as u32;
     m.itemHeight = scale(if item.separator { 9 } else { 27 });
-    m.itemWidth = sz.cx as u32 + scale(if item.top { 14 } else { 76 });
+    m.itemWidth = sz.cx as u32 + scale(if item.top { 20 } else { 76 });
     SelectObject(hdc, old);
     ReleaseDC(null_mut(), hdc);
     1
@@ -307,8 +307,8 @@ pub unsafe fn draw_menu(lp: isize) -> isize {
         },
     );
     let parts: Vec<_> = item.label.split('\t').collect();
-    r.left += s(if item.top { 7 } else { 28 });
-    r.right -= s(22);
+    r.left += s(if item.top { 8 } else { 28 });
+    r.right -= s(if item.top { 8 } else { 22 });
     DrawTextW(
         d.hDC,
         wide(parts[0]).as_ptr(),
@@ -761,6 +761,7 @@ fn themed_highlight(color: u32) -> u32 {
 }
 /// Recolor only uniform background runs, retaining readable text on existing highlights.
 pub unsafe fn recolor_raw(hwnd: HWND) {
+    let _undo = super::syntax::UndoPause::new(hwnd);
     let visible = GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_VISIBLE as isize != 0;
     let selected = range(hwnd);
     let mut scroll: POINT = zeroed();

@@ -1,5 +1,24 @@
 # Changelog
 
+## Rust edition 1.2.0
+
+- Position the plus button immediately after the last tab, retaining native overflow controls without spurious arrows when all tabs fit.
+- Drag tabs to reorder, with a movement threshold, drop marker, capture cancellation and preservation/repainting of the entire live editor. Keyboard reordering shares the same implementation.
+- Add per-tab Tools → Context: Plain text, PowerShell, JSON, YAML, XML/HTML and INI/config, including shortcuts and recovery.
+- Add dependency-free stateful lexical highlighting, 120 ms debounce, incremental line cache and visible-viewport rendering. Syntax formatting preserves undo/redo, selection, scroll, fonts and manual highlighter backgrounds.
+- Add dark/light semantic token palettes with automated 4.5:1 contrast tests.
+- Read legacy BFRSESS1 snapshots as Plain text; write BFRSESS2 snapshots with each tab's context. Older application versions cannot read the new snapshot format.
+- Verify 114 native UI checks, ten process-stop/restart recovery checks, fifteen unit/model/storage tests and real mouse/typing/theme interactions.
+
+## Rust edition 1.1.3
+
+- Right-click any tab to change its color or close it, retaining the current active document when acting on an inactive tab.
+- Add Cyan, Pink, Teal and Gray tab colors, including shortcuts and session persistence; retain existing color indices and shortcuts.
+- Group editor context-menu highlight actions under **Tekstmarkering**.
+- Add individual tab close crosses with hover feedback and a fixed **+** button for new blank tabs. Unsaved-tab Save/Discard/Cancel behavior is retained.
+- Fix clipped menu-bar label endings by matching text measurement to drawing insets.
+- Verify 93 native UI checks, nine process-stop/restart recovery checks and seven model/storage tests.
+
 ## Rust edition 1.1.2
 
 - Refresh the visible hex preview immediately after editor changes, undo/redo and replacing text; coalesce native change notifications and preserve hex scroll/selection when refreshing.

@@ -1,6 +1,34 @@
-# Validation — ByteForge Rust 1.1.2
+# Validation — ByteForge Rust 1.2.0
 
-## Current 1.1.2 build — 30 October 2026
+## Current 1.2.0 build — 30 October 2026
+
+- Path: `dist/ByteForge-Rust.exe`; size: 536,064 bytes (523.5 KiB); Windows FileVersion/ProductVersion: `1.2.0.0`.
+- SHA-256: `29A17D46A4F2FAF8ED7A66C25FFC72246E75EBEA887A116B403070788B99C2BA`.
+- Format check, **15 unit/model/storage tests**, Clippy on all targets with warnings denied and optimized release build passed.
+- **114 native UI integration checks** passed, including the plus immediately after the final tab, overflow reachability, native drag threshold/target/release messages, reordered editor visibility and live formatting, independent contexts, actual PowerShell/JSON foregrounds, theme/font switching, Plain text reset, manual highlight priority and undo/redo preservation.
+- Scroll checks confirm newly visible lines are colored without relexing or moving the viewport. Existing save/search/hex/encoding/recovery tests remain included.
+- **10 process-stop/restart checks** passed, including independent JSON, PowerShell and Plain text contexts restored in live tabs.
+- Local evidence: `output/qa-20261030-144412-845/checks.txt`, `result.txt`, `restart/result.txt`.
+- Lexer tests cover multiline PowerShell comments/here-strings, quoting, token roles, Unicode UTF-16 offsets, JSON keys/values, YAML block scalars, XML/INI categories, and incremental-versus-fresh equivalence across 120 edits for all six contexts. A legacy BFRSESS1 snapshot imports unchanged with Plain text contexts.
+- Automated contrast tests verify all 12 token roles at **at least 4.5:1** on both editor backgrounds. Manual highlighter backgrounds use the default theme foreground, not potentially conflicting token colors.
+- Release-mode cache measurement on this development host: **100,000 PowerShell lines / 3,688,890 bytes**, first analysis **73.76 ms**, subsequent one-line edit **8.24 ms**, only **two lines lexed**. These are lexer/cache timings, not end-to-end UI latency guarantees; initial work remains linear in file size.
+- Computer Use verified actual mouse dragging in both directions, preservation of the selected editor and text after moving, the adjacent plus following tab creation, PowerShell/JSON display, live typed token colors, per-tab context persistence, Tools → Context popup and Plain text selection, and readable dark/light rendering. All work used isolated fixture files under `output/manual-120`; user documents and the original FASM process were not controlled.
+- The design-language skill guided the two contrast-safe syntax palettes and native chrome; no dependency, sidecar grammar or interpreter was introduced. Syntax coloring is lexical, not full semantic analysis, linting, code folding or execution. Separate 125%/150% monitor configurations were not available for manual screenshot QA.
+- The canonical executable was replaced only after the isolated test instance was closed. Source, executable and validation notes are distributed together through the repository; no separate GitHub Release or automatic Rust update channel is configured.
+
+## Previous 1.1.3 build — 30 October 2026
+
+- Path: `dist/ByteForge-Rust-1.1.3.exe`; size: 482,816 bytes; Windows FileVersion/ProductVersion: `1.1.3.0`.
+- SHA-256: `DC78104A4CCE497ABE3FA2C6C08CB473B11DABB364D1313D53E282805399542A`.
+- Format check, seven model/storage tests, Clippy with warnings denied and optimized release build passed.
+- **93 native UI integration checks** passed, including inactive-tab color metadata/persistence, eleven-color checked context menu, compact text-highlight submenu, plus-button command, individual close hit areas, inactive dirty-tab Cancel/Discard with active-tab preservation, non-overlapping plus/overflow geometry and menu text measurement.
+- **Nine process-stop/restart checks** passed. Existing hex, theme, font, search, undo/redo, save and recovery coverage remains included.
+- Local evidence: `output/qa-20261030-142338-601/checks.txt`, `result.txt`, `restart/result.txt`.
+- An additional visible run passed **94 checks**, including reading the actual painted stripe pixel immediately after recoloring an inactive tab. Evidence: `output/qa-visible-113/checks.txt`, `result.txt`. This pixel check is skipped in the hidden harness because hidden windows have no readable screen pixels.
+- Computer Use exercised actual plus-button and close-cross mouse clicks, tab right-click color selection without switching active document, editor **Tekstmarkering** submenu and dark/light rendering. All six top-level menu labels render completely. Existing design-language palette and thick color stripes are retained.
+- The previous canonical executable was running during development and was not stopped or overwritten. The new version is delivered side-by-side; close the old instance before opening this version with the same recovery workspace. `scripts/build.ps1 -Output` supports alternate build paths.
+
+## Previous 1.1.2 build — 30 October 2026
 
 - Path: `dist/ByteForge-Rust.exe`; size: 471,040 bytes; Windows FileVersion/ProductVersion: `1.1.2.0`.
 - SHA-256: `42E8EB0844AD5DA6FDAF2C9B4353624AED539065FFE37C29BA96A6D1DA0C4CE3`.

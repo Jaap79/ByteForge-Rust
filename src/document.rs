@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 pub const MAX_DOCUMENT: usize = 32 * 1024 * 1024;
 pub const MAX_TABS: usize = 128;
-pub const TAB_COLORS: [(&str, u32); 7] = [
+pub const TAB_COLORS: [(&str, u32); 11] = [
     ("Default", 0xFF982E),
     ("Red", 0xEF7180),
     ("Orange", 0xFFB65C),
@@ -10,7 +10,12 @@ pub const TAB_COLORS: [(&str, u32); 7] = [
     ("Green", 0x62CBA0),
     ("Blue", 0x75B8F5),
     ("Purple", 0xB59AE8),
+    ("Cyan", 0x5AC8CF),
+    ("Pink", 0xEB91C2),
+    ("Teal", 0x46B7A1),
+    ("Gray", 0xA0A8B3),
 ];
+pub const TAB_COLOR_KEYS: &[u8; 11] = b"0123456789G";
 pub const HIGHLIGHTS: [u32; 4] = [0xFFA0A0, 0xFFC800, 0xFFFF00, 0x80FF80];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,6 +57,7 @@ pub struct Document {
     pub scroll: (i32, i32),
     pub highlights: Vec<Highlight>,
     pub hex: u8,
+    pub context: crate::syntax::Context,
 }
 impl Default for Document {
     fn default() -> Self {
@@ -72,6 +78,7 @@ impl Default for Document {
             scroll: (0, 0),
             highlights: vec![],
             hex: 0,
+            context: crate::syntax::Context::Plain,
         }
     }
 }

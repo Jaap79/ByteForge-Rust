@@ -6,7 +6,7 @@ use std::{
     os::windows::ffi::{OsStrExt, OsStringExt},
     path::{Path, PathBuf},
 };
-const MAGIC: &[u8; 8] = b"BFRSESS1";
+const MAGIC: &[u8; 8] = b"BFRSESS2";
 const LIMIT: usize = 128 * 1024 * 1024;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Session {
@@ -85,6 +85,7 @@ pub fn encode(s: &Session) -> Result<Vec<u8>, String> {
             d.color,
             d.wrap as u8,
             d.hex,
+            d.context as u8,
         ]);
         for n in [
             d.points,
@@ -143,9 +144,13 @@ impl<'a> Reader<'a> {
     }
 }
 pub fn decode(data: &[u8]) -> Result<Session, String> {
-    if data.len() < 22 || data.len() > LIMIT + 4 || &data[..8] != MAGIC {
+    if data.len() < 22
+        || data.len() > LIMIT + 4
+        || (&data[..8] != MAGIC && &data[..8] != b"BFRSESS1")
+    {
         return Err("Unsupported session format/size".into());
     }
+    let v2 = &data[..8] == MAGIC;
     let end = data.len() - 4;
     if crc(&data[..end]) != u32::from_le_bytes(data[end..].try_into().unwrap()) {
         return Err("Session checksum mismatch".into());
@@ -201,6 +206,11 @@ pub fn decode(data: &[u8]) -> Result<Session, String> {
         let color = r.byte()?;
         let wrap = r.byte()? != 0;
         let hex = r.byte()?;
+        let context = if v2 {
+            crate::syntax::Context::from_id(r.byte()?).ok_or("Invalid syntax context")?
+        } else {
+            crate::syntax::Context::Plain
+        };
         let points = r.signed()?;
         let zoom = r.signed()?;
         let selection = (r.signed()?, r.signed()?);
@@ -246,6 +256,7 @@ pub fn decode(data: &[u8]) -> Result<Session, String> {
             scroll,
             highlights,
             hex,
+            context,
         });
     }
     if r.at != end {
@@ -313,6 +324,7 @@ mod tests {
             text: "abc 😀\nxyz".into(),
             dirty: true,
             color: 4,
+            context: crate::syntax::Context::PowerShell,
             font: "Georgia".into(),
             zoom: 160,
             wrap: true,
@@ -345,6 +357,28 @@ mod tests {
         let mut trailing = data;
         trailing.push(1);
         assert!(decode(&trailing).is_err());
+    }
+    #[test]
+    fn reads_original_v1_sessions() {
+        let mut s = Session::default();
+        s.documents[0].text = "Keep old scratch text 😀".into();
+        let mut bytes = encode(&s).unwrap();
+        let mut r = Reader {
+            bytes: &bytes,
+            at: 18,
+        };
+        let path = r.number().unwrap() as usize;
+        r.take(path * 2).unwrap();
+        for _ in 0..4 {
+            r.string(MAX_DOCUMENT).unwrap();
+        }
+        let context_offset = r.at + 6;
+        bytes.remove(context_offset);
+        bytes[..8].copy_from_slice(b"BFRSESS1");
+        let end = bytes.len() - 4;
+        let sum = crc(&bytes[..end]);
+        bytes[end..].copy_from_slice(&sum.to_le_bytes());
+        assert_eq!(decode(&bytes).unwrap(), s);
     }
     #[test]
     fn backup_recovery() {

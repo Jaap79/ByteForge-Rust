@@ -2,10 +2,12 @@
 mod native;
 mod platform;
 mod qa;
+mod syntax;
 use byteforge_rust::{
     document::{self, Document, Highlight, HIGHLIGHTS, MAX_TABS, TAB_COLORS},
     session::{self, Session},
     storage,
+    syntax::Context,
 };
 use native::*;
 use std::{
@@ -53,7 +55,7 @@ const FONT_SEGOE: u16 = 251;
 const FONT_GEORGIA: u16 = 252;
 const FONT_CONSOLAS: u16 = 253;
 const FONT_CUSTOM: u16 = 254;
-const COLOR_BASE: u16 = 260;
+const COLOR_BASE: u16 = 320;
 const HEX_LEFT: u16 = 270;
 const HEX_RIGHT: u16 = 271;
 const HEX_BELOW: u16 = 272;
@@ -76,6 +78,21 @@ const INIT: u32 = WM_APP + 1;
 const RUN_QA: u32 = WM_APP + 2;
 const ACTIVE_TAB: u32 = WM_APP + 3;
 const REFRESH_HEX: u32 = WM_APP + 4;
+const CLOSE_TAB_AT: u32 = WM_APP + 5;
+const TAB_CONTEXT: u32 = WM_APP + 6;
+const MOVE_TAB: u32 = WM_APP + 7;
+const SYNTAX_VIEW: u32 = WM_APP + 8;
+const SYNTAX_TIMER: usize = 2;
+const CONTEXT_BASE: u16 = 340;
+#[derive(Clone, Copy)]
+struct TabDrag {
+    from: usize,
+    target: usize,
+    start: POINT,
+    dragging: bool,
+}
+thread_local! {static TAB_DRAG:std::cell::Cell<Option<TabDrag>>=const{std::cell::Cell::new(None)};}
+thread_local! {static TAB_HOVER:std::cell::Cell<i32>=const{std::cell::Cell::new(-1)};static TAB_PRESSED:std::cell::Cell<Option<usize>>=const{std::cell::Cell::new(None)};}
 fn tab_stripe_height(active: bool) -> i32 {
     if active {
         8
@@ -90,6 +107,7 @@ struct Tab {
     edit: HWND,
     font: HFONT,
     changed: bool,
+    syntax: RefCell<syntax::Display>,
 }
 #[derive(Clone, Debug)]
 struct Hit {
@@ -102,6 +120,7 @@ struct Hit {
 struct App {
     hwnd: HWND,
     tabs: HWND,
+    new_tab: HWND,
     status: HWND,
     hex: HWND,
     hex_label: HWND,
@@ -195,7 +214,7 @@ pub fn run() {
         let hwnd = CreateWindowExW(
             WS_EX_ACCEPTFILES,
             class.as_ptr(),
-            wide("ByteForge Rust 1.1.2").as_ptr(),
+            wide("ByteForge Rust 1.2.0").as_ptr(),
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -282,6 +301,18 @@ pub fn run() {
         SetTimer(hwnd, 1, 1500, None);
         let mut msg: MSG = zeroed();
         while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
+            if msg.message == WM_KEYDOWN
+                && msg.wParam == VK_ESCAPE as usize
+                && TAB_DRAG.get().is_some()
+            {
+                TAB_DRAG.set(None);
+                let tabs = GetCapture();
+                ReleaseCapture();
+                if !tabs.is_null() {
+                    InvalidateRect(tabs, null(), 0);
+                }
+                continue;
+            }
             let search_enter = msg.message == WM_KEYDOWN
                 && msg.wParam == VK_RETURN as usize
                 && APP.with(|a| {
@@ -446,7 +477,24 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: usize, lp: isize) ->
                 Some(0)
             }
             WM_TIMER => {
-                app.tick();
+                if wp == SYNTAX_TIMER {
+                    KillTimer(hwnd, SYNTAX_TIMER);
+                    app.capture(app.active);
+                    app.paint_syntax(true);
+                    app.update_title();
+                } else {
+                    app.tick();
+                }
+                Some(0)
+            }
+            SYNTAX_VIEW => {
+                if wp as HWND == app.edit() && !app.documents[app.active].changed {
+                    app.paint_syntax(false);
+                }
+                Some(0)
+            }
+            MOVE_TAB => {
+                app.move_tab(wp, lp as usize);
                 Some(0)
             }
             REFRESH_HEX => {
@@ -491,7 +539,19 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: usize, lp: isize) ->
                 Some(0)
             }
             WM_CONTEXTMENU => {
-                app.context_menu(lp);
+                if wp as HWND == app.tabs {
+                    app.tab_context_menu(app.active, lp);
+                } else if wp as HWND == app.edit() || wp as HWND == app.hex {
+                    app.context_menu(lp);
+                }
+                Some(0)
+            }
+            CLOSE_TAB_AT => {
+                app.close_tab_at(wp);
+                Some(0)
+            }
+            TAB_CONTEXT => {
+                app.tab_context_menu(wp, lp);
                 Some(0)
             }
             INIT => {
@@ -499,10 +559,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: usize, lp: isize) ->
                 Some(0)
             }
             ACTIVE_TAB => {
-                let i = SendMessageW(app.tabs, TCM_GETCURSEL, 0, 0);
-                if i >= 0 {
-                    app.activate(i as usize);
-                }
+                app.activate(wp);
                 Some(0)
             }
             RUN_QA => {
@@ -537,9 +594,14 @@ pub unsafe fn draw_button(d: &DRAWITEMSTRUCT) -> isize {
     SetTextColor(d.hDC, p.text);
     let old = SelectObject(d.hDC, ui_font());
     let mut r = d.rcItem;
+    let label = if d.CtlID == NEW as u32 {
+        "+".to_string()
+    } else {
+        text(d.hwndItem)
+    };
     DrawTextW(
         d.hDC,
-        wide(&text(d.hwndItem)).as_ptr(),
+        wide(&label).as_ptr(),
         -1,
         &mut r,
         DT_CENTER | DT_VCENTER | DT_SINGLELINE,
@@ -550,6 +612,31 @@ pub unsafe fn draw_button(d: &DRAWITEMSTRUCT) -> isize {
 
 /// Keep the native TabControl's accessibility, keyboard navigation and hit testing,
 /// but paint its entire surface so system-white borders do not leak into dark mode.
+fn tab_close_rect(r: RECT, dpi: i32) -> RECT {
+    let s = |n| n * dpi / 96;
+    RECT {
+        left: r.right - s(26),
+        right: r.right - s(3),
+        top: r.top + s(9),
+        bottom: r.bottom - s(2),
+    }
+}
+unsafe fn tab_hit(hwnd: HWND, pt: POINT) -> Option<(usize, bool)> {
+    let mut hit = TCHITTESTINFO { pt, ..zeroed() };
+    let index = SendMessageW(hwnd, TCM_HITTEST, 0, &mut hit as *mut _ as isize);
+    if index < 0 {
+        return None;
+    }
+    let mut rect: RECT = zeroed();
+    SendMessageW(
+        hwnd,
+        TCM_GETITEMRECT,
+        index as usize,
+        &mut rect as *mut _ as isize,
+    );
+    let close = tab_close_rect(rect, GetDpiForWindow(hwnd).max(96) as i32);
+    Some((index as usize, PtInRect(&close, pt) != 0))
+}
 unsafe extern "system" fn tab_proc(
     hwnd: HWND,
     msg: u32,
@@ -558,6 +645,151 @@ unsafe extern "system" fn tab_proc(
     _id: usize,
     _data: usize,
 ) -> isize {
+    let mouse = POINT {
+        x: (lp as i16) as i32,
+        y: ((lp >> 16) as i16) as i32,
+    };
+    match msg {
+        WM_RBUTTONDOWN => return 0,
+        WM_MOUSEMOVE => {
+            if let Some(mut drag) = TAB_DRAG.get() {
+                drag.dragging |= (mouse.x - drag.start.x).abs()
+                    >= GetSystemMetrics(SM_CXDRAG).max(4)
+                    || (mouse.y - drag.start.y).abs() >= GetSystemMetrics(SM_CYDRAG).max(4);
+                if drag.dragging {
+                    let count = SendMessageW(hwnd, TCM_GETITEMCOUNT, 0, 0) as usize;
+                    let mut client: RECT = zeroed();
+                    GetClientRect(hwnd, &mut client);
+                    drag.target = tab_hit(hwnd, mouse)
+                        .map(|(i, _)| i)
+                        .unwrap_or(if mouse.x < 0 {
+                            0
+                        } else if mouse.x >= client.right {
+                            count.saturating_sub(1)
+                        } else {
+                            drag.target
+                        });
+                    InvalidateRect(hwnd, null(), 0);
+                }
+                TAB_DRAG.set(Some(drag));
+                return 0;
+            }
+            let hover = tab_hit(hwnd, mouse)
+                .filter(|(_, close)| *close)
+                .map(|(i, _)| i as i32)
+                .unwrap_or(-1);
+            if TAB_HOVER.replace(hover) != hover {
+                InvalidateRect(hwnd, null(), 0);
+            }
+            let mut track = TRACKMOUSEEVENT {
+                cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+                dwFlags: TME_LEAVE,
+                hwndTrack: hwnd,
+                dwHoverTime: 0,
+            };
+            TrackMouseEvent(&mut track);
+        }
+        WM_MOUSELEAVE => {
+            TAB_HOVER.set(-1);
+            InvalidateRect(hwnd, null(), 0);
+        }
+        WM_LBUTTONDOWN => {
+            if let Some((index, true)) = tab_hit(hwnd, mouse) {
+                TAB_PRESSED.set(Some(index));
+                SetCapture(hwnd);
+                return 0;
+            }
+            if let Some((index, false)) = tab_hit(hwnd, mouse) {
+                TAB_DRAG.set(Some(TabDrag {
+                    from: index,
+                    target: index,
+                    start: mouse,
+                    dragging: false,
+                }));
+                SetCapture(hwnd);
+                PostMessageW(GetParent(hwnd), ACTIVE_TAB, index, 0);
+                return 0;
+            }
+        }
+        WM_LBUTTONUP => {
+            if let Some(index) = TAB_PRESSED.take() {
+                ReleaseCapture();
+                if tab_hit(hwnd, mouse) == Some((index, true)) {
+                    PostMessageW(GetParent(hwnd), CLOSE_TAB_AT, index, 0);
+                }
+                return 0;
+            }
+            if let Some(drag) = TAB_DRAG.take() {
+                ReleaseCapture();
+                if drag.dragging && drag.from != drag.target {
+                    PostMessageW(GetParent(hwnd), MOVE_TAB, drag.from, drag.target as isize);
+                }
+                InvalidateRect(hwnd, null(), 0);
+                return 0;
+            }
+        }
+        WM_CAPTURECHANGED => {
+            TAB_PRESSED.set(None);
+            TAB_DRAG.set(None);
+            InvalidateRect(hwnd, null(), 0);
+        }
+        WM_KEYDOWN if wp == VK_ESCAPE as usize => {
+            TAB_DRAG.set(None);
+            TAB_PRESSED.set(None);
+            ReleaseCapture();
+            InvalidateRect(hwnd, null(), 0);
+            return 0;
+        }
+        WM_RBUTTONUP => {
+            if let Some((index, _)) = tab_hit(hwnd, mouse) {
+                let mut pt = mouse;
+                ClientToScreen(hwnd, &mut pt);
+                PostMessageW(
+                    GetParent(hwnd),
+                    TAB_CONTEXT,
+                    index,
+                    ((pt.y as u32) << 16 | (pt.x as u32 & 65535)) as i32 as isize,
+                );
+            }
+            return 0;
+        }
+        WM_CONTEXTMENU => {
+            let (index, point) = if lp == -1 {
+                let index = SendMessageW(hwnd, TCM_GETCURSEL, 0, 0);
+                if index < 0 {
+                    return 0;
+                }
+                let mut r: RECT = zeroed();
+                SendMessageW(
+                    hwnd,
+                    TCM_GETITEMRECT,
+                    index as usize,
+                    &mut r as *mut _ as isize,
+                );
+                let mut p = POINT {
+                    x: r.left + 12,
+                    y: r.bottom,
+                };
+                ClientToScreen(hwnd, &mut p);
+                (index as usize, p)
+            } else {
+                let mut p = mouse;
+                ScreenToClient(hwnd, &mut p);
+                let Some((i, _)) = tab_hit(hwnd, p) else {
+                    return 0;
+                };
+                (i, mouse)
+            };
+            PostMessageW(
+                GetParent(hwnd),
+                TAB_CONTEXT,
+                index,
+                ((point.y as u32) << 16 | (point.x as u32 & 65535)) as i32 as isize,
+            );
+            return 0;
+        }
+        _ => {}
+    }
     if msg == WM_ERASEBKGND {
         return 1;
     }
@@ -601,8 +833,31 @@ unsafe extern "system" fn tab_proc(
             };
             FillRect(dc, &stripe, b);
             DeleteObject(b);
+            let close = tab_close_rect(r, dpi);
+            if TAB_HOVER.get() == i as i32 {
+                FillRect(dc, &close, brush(3));
+            }
+            let pen = CreatePen(
+                PS_SOLID,
+                s(2).max(1),
+                if TAB_HOVER.get() == i as i32 {
+                    ACCENT
+                } else {
+                    palette().muted
+                },
+            );
+            let old_pen = SelectObject(dc, pen);
+            let cx = (close.left + close.right) / 2;
+            let cy = (close.top + close.bottom) / 2;
+            let d = s(4);
+            MoveToEx(dc, cx - d, cy - d, null_mut());
+            LineTo(dc, cx + d, cy + d);
+            MoveToEx(dc, cx + d, cy - d, null_mut());
+            LineTo(dc, cx - d, cy + d);
+            SelectObject(dc, old_pen);
+            DeleteObject(pen);
             r.left += s(12);
-            r.right -= s(8);
+            r.right = close.left - s(4);
             SetTextColor(dc, palette().text);
             DrawTextW(
                 dc,
@@ -611,6 +866,29 @@ unsafe extern "system" fn tab_proc(
                 &mut r,
                 DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX,
             );
+        }
+        if let Some(drag) = TAB_DRAG.get().filter(|d| d.dragging && d.from != d.target) {
+            let mut r: RECT = zeroed();
+            SendMessageW(
+                hwnd,
+                TCM_GETITEMRECT,
+                drag.target,
+                &mut r as *mut _ as isize,
+            );
+            let x = if drag.target > drag.from {
+                r.right - s(2)
+            } else {
+                r.left
+            };
+            let marker = RECT {
+                left: x,
+                top: r.top,
+                right: x + s(3),
+                bottom: r.bottom,
+            };
+            let b = CreateSolidBrush(ACCENT);
+            FillRect(dc, &marker, b);
+            DeleteObject(b);
         }
         SelectObject(dc, old);
         EndPaint(hwnd, &ps);
@@ -697,9 +975,21 @@ impl App {
             "SysTabControl32",
             "Open documents",
             400,
-            TCS_FIXEDWIDTH | TCS_BUTTONS | TCS_FLATBUTTONS | TCS_FOCUSONBUTTONDOWN | WS_TABSTOP,
+            TCS_FIXEDWIDTH
+                | TCS_BUTTONS
+                | TCS_FLATBUTTONS
+                | TCS_FOCUSONBUTTONDOWN
+                | WS_TABSTOP
+                | WS_CLIPSIBLINGS,
         );
         SetWindowSubclass(tabs, Some(tab_proc), 1, 0);
+        let new_tab = child(
+            hwnd,
+            "BUTTON",
+            "Nieuw tabblad (Ctrl+N)",
+            NEW,
+            BS_OWNERDRAW as u32 | WS_TABSTOP | WS_CLIPSIBLINGS,
+        );
         SendMessageW(tabs, TCM_SETITEMSIZE, 0, ((30 << 16) | 180) as isize);
         let status = child(hwnd, "STATIC", "Ready", 401, SS_LEFT);
         let hex = child(
@@ -785,6 +1075,7 @@ impl App {
         Self {
             hwnd,
             tabs,
+            new_tab,
             status,
             hex,
             hex_label,
@@ -854,6 +1145,7 @@ impl App {
         );
         self.next_control += 1;
         ShowWindow(edit, SW_HIDE);
+        SetWindowSubclass(edit, Some(syntax::editor_proc), 2, 0);
         // RichEdit starts with a system-white background; apply the current mode
         // before the editor is populated or activated (also covers Open/restore).
         SendMessageW(edit, 0x443, 0, palette().control as isize);
@@ -896,6 +1188,7 @@ impl App {
             edit,
             font: null_mut(),
             changed: false,
+            syntax: RefCell::new(syntax::Display::default()),
         });
         self.invalidate_results();
         self.apply_font(self.documents.len() - 1);
@@ -921,6 +1214,45 @@ impl App {
         self.layout();
         self.update_title();
         InvalidateRect(self.tabs, null(), 1);
+        self.paint_syntax(true);
+    }
+    unsafe fn paint_syntax(&self, force: bool) {
+        if let Some(t) = self.documents.get(self.active) {
+            t.syntax
+                .borrow_mut()
+                .paint(t.edit, &t.doc.text, t.doc.context, force);
+        }
+    }
+    unsafe fn move_tab(&mut self, from: usize, to: usize) {
+        if from >= self.documents.len() || to >= self.documents.len() || from == to {
+            return;
+        }
+        self.capture(self.active);
+        let active = self.edit();
+        let tab = self.documents.remove(from);
+        self.documents.insert(to, tab);
+        self.active = self
+            .documents
+            .iter()
+            .position(|t| t.edit == active)
+            .unwrap();
+        SendMessageW(self.tabs, TCM_SETCURSEL, self.active, 0);
+        for (i, t) in self.documents.iter().enumerate() {
+            ShowWindow(t.edit, if i == self.active { SW_SHOW } else { SW_HIDE });
+        }
+        self.invalidate_results();
+        self.update_title();
+        self.layout();
+        self.refresh_hex();
+        self.paint_syntax(true);
+        InvalidateRect(self.edit(), null(), 1);
+        RedrawWindow(
+            self.hwnd,
+            null(),
+            null_mut(),
+            RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW,
+        );
+        SetFocus(self.edit());
     }
     unsafe fn capture(&mut self, index: usize) {
         let mut edited = false;
@@ -932,6 +1264,7 @@ impl App {
             if current != tab.doc.text {
                 tab.doc.text = current;
                 tab.doc.dirty = true;
+                tab.syntax.borrow_mut().dirty = true;
                 edited = true;
             }
             tab.changed = false;
@@ -951,6 +1284,10 @@ impl App {
     unsafe fn editor_changed(&mut self, hwnd: HWND) {
         if let Some(tab) = self.documents.iter_mut().find(|t| t.edit == hwnd) {
             tab.changed = true;
+            tab.syntax.borrow_mut().dirty = true;
+        }
+        if hwnd == self.edit() && self.documents[self.active].doc.context != Context::Plain {
+            SetTimer(self.hwnd, SYNTAX_TIMER, 120, None);
         }
         if hwnd == self.edit()
             && self.documents[self.active].doc.hex != 0
@@ -1063,7 +1400,7 @@ impl App {
                 self.update = None;
                 match result {
                     Ok(v) => {
-                        prompt(self.hwnd,"Upstream version",&format!("Rust edition: 1.1.2\nFASM upstream: {v}\n\nThis is the original FASM feed, not an update channel for this Rust edition.\nhttps://github.com/Jaap79/ByteForge"),None,&["OK"]);
+                        prompt(self.hwnd,"Upstream version",&format!("Rust edition: 1.2.0\nFASM upstream: {v}\n\nThis is the original FASM feed, not an update channel for this Rust edition.\nhttps://github.com/Jaap79/ByteForge"),None,&["OK"]);
                     }
                     Err(e) => error(self.hwnd, &e),
                 }
@@ -1081,7 +1418,7 @@ impl App {
         set_text(
             self.hwnd,
             &format!(
-                "{}{} — ByteForge Rust 1.1.2",
+                "{}{} — ByteForge Rust 1.2.0",
                 if tab.doc.dirty { "* " } else { "" },
                 path
             ),
@@ -1101,7 +1438,7 @@ impl App {
         set_text(
             self.status,
             &format!(
-                "  Tab {}/{}  |  Ln {}, Col {}  |  {:?} / {:?}  |  {} {}pt / {}%  |  Recovery {}{}",
+                "  Tab {}/{}  |  Ln {}, Col {}  |  {:?} / {:?}  |  {} {}pt / {}%  |  {}  |  Recovery {}{}",
                 self.active + 1,
                 self.documents.len(),
                 line,
@@ -1111,6 +1448,7 @@ impl App {
                 tab.doc.font,
                 tab.doc.points,
                 tab.doc.zoom,
+                tab.doc.context.label(),
                 if self.recovery { "ON" } else { "OFF" },
                 if self.note.is_empty() {
                     String::new()
@@ -1127,12 +1465,40 @@ impl App {
         let width = r.right.max(0);
         let height = r.bottom.max(0);
         let s = |n| self.scale(n);
-        MoveWindow(self.tabs, 0, 0, width, s(36), 1);
+        MoveWindow(self.tabs, 0, 0, (width - s(40)).max(0), s(36), 1);
         SendMessageW(
             self.tabs,
             TCM_SETITEMSIZE,
             0,
             ((s(30) << 16) | s(180)) as isize,
+        );
+        let mut last: RECT = zeroed();
+        let count = SendMessageW(self.tabs, TCM_GETITEMCOUNT, 0, 0);
+        if count > 0 {
+            SendMessageW(
+                self.tabs,
+                TCM_GETITEMRECT,
+                (count - 1) as usize,
+                &mut last as *mut _ as isize,
+            );
+        }
+        // Keep native overflow measurement at the available bar width. Shrinking
+        // to the last item's rect makes TabControl add spurious overflow arrows.
+        let overflow = count as i32 * s(190) > width - s(40);
+        let plus_x = if overflow {
+            (width - s(36)).max(0)
+        } else {
+            (last.right + s(4)).min((width - s(36)).max(0))
+        };
+        MoveWindow(self.new_tab, plus_x, s(2), s(32).min(width), s(30), 1);
+        SetWindowPos(
+            self.new_tab,
+            HWND_TOP,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
         );
         MoveWindow(self.status, 0, (height - s(26)).max(0), width, s(26), 1);
         let top = if self.search_visible { s(112) } else { s(36) };
@@ -1230,6 +1596,7 @@ impl App {
         self.refresh_hex();
     }
     unsafe fn apply_font(&mut self, i: usize) {
+        self.capture(i);
         let t = &mut self.documents[i];
         let new = font(&t.doc.font, t.doc.points, self.dpi);
         SendMessageW(t.edit, WM_SETFONT, new as usize, 0);
@@ -1249,6 +1616,10 @@ impl App {
         SendMessageW(t.edit, 0x444, 0, &cf as *const _ as isize);
         SendMessageW(t.edit, 0x4e1, t.doc.zoom as usize, 100);
         recolor_raw(t.edit);
+        t.syntax.borrow_mut().invalidate();
+        t.syntax
+            .borrow_mut()
+            .paint(t.edit, &t.doc.text, t.doc.context, true);
         InvalidateRect(t.edit, null(), 1);
     }
     unsafe fn set_wrap(&self, i: usize) {
@@ -1261,6 +1632,7 @@ impl App {
         let p = palette();
         for hwnd in [
             self.tabs,
+            self.new_tab,
             self.status,
             self.results,
             self.hex_label,
@@ -1274,7 +1646,9 @@ impl App {
         for t in &self.documents {
             SendMessageW(t.edit, 0x443, 0, p.control as isize);
             recolor_raw(t.edit);
+            t.syntax.borrow_mut().invalidate();
         }
+        self.paint_syntax(true);
         SendMessageW(self.hex, 0x443, 0, p.control as isize);
         recolor_raw(self.hex);
         DrawMenuBar(self.hwnd);
@@ -1448,6 +1822,33 @@ impl App {
             error(self.hwnd, &e);
         }
         true
+    }
+    unsafe fn close_tab_at(&mut self, index: usize) -> bool {
+        if index >= self.documents.len() {
+            return false;
+        }
+        let original = self.edit();
+        self.activate(index);
+        let closed = self.close_tab();
+        if let Some(index) = self.documents.iter().position(|t| t.edit == original) {
+            self.activate(index);
+        }
+        closed
+    }
+    unsafe fn set_tab_color(&mut self, index: usize, color: u8) {
+        if color as usize >= TAB_COLORS.len() {
+            return;
+        }
+        if let Some(tab) = self.documents.get_mut(index) {
+            tab.doc.color = color;
+            self.update_title();
+            RedrawWindow(
+                self.hwnd,
+                null(),
+                null_mut(),
+                RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_FRAME | RDW_UPDATENOW,
+            );
+        }
     }
     unsafe fn close_app(&mut self) -> bool {
         if self.recovery {
@@ -1686,6 +2087,8 @@ impl App {
         }
         .into();
         InvalidateRect(self.edit(), null(), 1);
+        self.capture(self.active);
+        self.paint_syntax(true);
     }
     unsafe fn refresh_hex(&self) {
         let d = &self.documents[self.active].doc;
@@ -1879,6 +2282,7 @@ impl App {
             CLEAR => self.highlight(None),
             HL_RED..=HL_GREEN => self.highlight(Some(HIGHLIGHTS[(id - HL_RED) as usize])),
             DARK_MODE => {
+                self.capture(self.active);
                 DARK.set(!DARK.get());
                 brushes();
                 self.apply_theme();
@@ -1927,9 +2331,16 @@ impl App {
                     self.apply_font(self.active);
                 }
             }
-            COLOR_BASE..=266 => {
-                self.documents[self.active].doc.color = (id - COLOR_BASE) as u8;
-                InvalidateRect(self.tabs, null(), 1);
+            id if (COLOR_BASE..COLOR_BASE + TAB_COLORS.len() as u16).contains(&id) => {
+                self.set_tab_color(self.active, (id - COLOR_BASE) as u8);
+            }
+            id if (CONTEXT_BASE..CONTEXT_BASE + Context::ALL.len() as u16).contains(&id) => {
+                self.capture(self.active);
+                let t = &mut self.documents[self.active];
+                t.doc.context = Context::from_id((id - CONTEXT_BASE) as u8).unwrap();
+                t.syntax.borrow_mut().dirty = true;
+                self.paint_syntax(true);
+                self.update_title();
             }
             HEX_LEFT | HEX_RIGHT | HEX_BELOW | HEX_CLOSE => {
                 self.capture(self.active);
@@ -2003,10 +2414,7 @@ impl App {
                 } else {
                     (from + 1).min(self.documents.len() - 1)
                 };
-                self.documents.swap(from, to);
-                self.active = to;
-                self.activate(to);
-                self.invalidate_results();
+                self.move_tab(from, to);
             }
             RECOVERY => {
                 if self.recovery {
@@ -2059,18 +2467,25 @@ impl App {
                 }
             }
             ABOUT => {
-                prompt(self.hwnd,"About ByteForge Rust","ByteForge Rust 1.1.2\nNative Win32 / RichEdit — Rust edition\nForked from ByteForge 1.0.0.10 (a401721).\n\nTabs, independent formatting, cross-tab search and crash recovery.\nRecovery stores readable text in your local profile.\n\nBugs / security: jaapengel79@proton.me",None,&["OK"]);
+                prompt(self.hwnd,"About ByteForge Rust","ByteForge Rust 1.2.0\nNative Win32 / RichEdit — Rust edition\nForked from ByteForge 1.0.0.10 (a401721).\n\nDraggable tabs, per-tab syntax contexts, cross-tab search and recovery.\nRecovery stores readable text in your local profile.\n\nBugs / security: jaapengel79@proton.me",None,&["OK"]);
             }
             423 | 424 => self.invalidate_results(),
             _ => {}
         }
         self.capture(self.active);
+        self.paint_syntax(false);
         self.update_title();
     }
     unsafe fn menu_state(&self) {
         self.menus.check(DARK_MODE, DARK.get());
         self.menus.check(WRAP, self.documents[self.active].doc.wrap);
         self.menus.check(RECOVERY, self.recovery);
+        for context in Context::ALL {
+            self.menus.check(
+                CONTEXT_BASE + context as u16,
+                self.documents[self.active].doc.context == context,
+            );
+        }
         for i in 0..TAB_COLORS.len() {
             self.menus.check(
                 COLOR_BASE + i as u16,
@@ -2100,22 +2515,39 @@ impl App {
         )?;
         session::clear(&self.dir)
     }
-    unsafe fn context_menu(&mut self, lp: isize) {
-        let mut m = Menus::new();
-        let pop = m.popup();
-        for (id, label) in [
-            (CUT, "Cut\tCtrl+X"),
-            (COPY, "Copy\tCtrl+C"),
-            (PASTE, "Paste\tCtrl+V"),
-            (FIND_MORE, "Find selection in all tabs"),
-            (CLEAR, "Remove highlight\tCtrl+0"),
-            (HL_RED, "Red\tCtrl+1"),
-            (HL_ORANGE, "Orange\tCtrl+2"),
-            (HL_YELLOW, "Yellow\tCtrl+3"),
-            (HL_GREEN, "Green\tCtrl+4"),
-        ] {
-            m.add(pop, id as usize, label, false);
+    unsafe fn tab_context_menu(&mut self, index: usize, lp: isize) {
+        if index >= self.documents.len() {
+            return;
         }
+        let (m, pop) = tab_menu(self.documents[index].doc.color);
+        m.theme();
+        let mut p = POINT {
+            x: (lp as i16) as i32,
+            y: ((lp >> 16) as i16) as i32,
+        };
+        if lp == -1 {
+            GetCursorPos(&mut p);
+        }
+        let id = TrackPopupMenu(
+            pop,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            p.x,
+            p.y,
+            0,
+            self.hwnd,
+            null(),
+        );
+        DestroyMenu(pop);
+        DestroyMenu(m.root);
+        if (COLOR_BASE as i32..COLOR_BASE as i32 + TAB_COLORS.len() as i32).contains(&id) {
+            self.set_tab_color(index, (id - COLOR_BASE as i32) as u8);
+        } else if id == CLOSE as i32 {
+            self.close_tab_at(index);
+        }
+    }
+    unsafe fn context_menu(&mut self, lp: isize) {
+        let selected = range(self.edit());
+        let (m, pop) = editor_menu(selected.start != selected.end);
         m.theme();
         let mut p = POINT {
             x: (lp as i16) as i32,
@@ -2141,6 +2573,57 @@ impl App {
     }
 }
 
+unsafe fn tab_menu(color: u8) -> (Menus, HMENU) {
+    let mut m = Menus::new();
+    let pop = m.popup();
+    let colors = m.popup();
+    for (i, (name, _)) in TAB_COLORS.iter().enumerate() {
+        m.add(colors, (COLOR_BASE + i as u16) as usize, name, false);
+        CheckMenuItem(
+            colors,
+            (COLOR_BASE + i as u16) as u32,
+            MF_BYCOMMAND
+                | if i == color as usize {
+                    MF_CHECKED
+                } else {
+                    MF_UNCHECKED
+                },
+        );
+    }
+    m.add(pop, colors as usize, "Tabkleur", true);
+    m.add(pop, CLOSE as usize, "Tabblad sluiten\tCtrl+W", false);
+    (m, pop)
+}
+unsafe fn editor_menu(selected: bool) -> (Menus, HMENU) {
+    let mut m = Menus::new();
+    let pop = m.popup();
+    for (id, label) in [
+        (CUT, "Cut\tCtrl+X"),
+        (COPY, "Copy\tCtrl+C"),
+        (PASTE, "Paste\tCtrl+V"),
+        (FIND_MORE, "Find selection in all tabs"),
+    ] {
+        m.add(pop, id as usize, label, false);
+        if !selected && id != PASTE {
+            EnableMenuItem(pop, id as u32, MF_BYCOMMAND | MF_GRAYED);
+        }
+    }
+    let hl = m.popup();
+    for (id, label) in [
+        (CLEAR, "Markering verwijderen\tCtrl+0"),
+        (HL_RED, "Rood\tCtrl+1"),
+        (HL_ORANGE, "Oranje\tCtrl+2"),
+        (HL_YELLOW, "Geel\tCtrl+3"),
+        (HL_GREEN, "Groen\tCtrl+4"),
+    ] {
+        m.add(hl, id as usize, label, false);
+        if !selected {
+            EnableMenuItem(hl, id as u32, MF_BYCOMMAND | MF_GRAYED);
+        }
+    }
+    m.add(pop, hl as usize, "Tekstmarkering", true);
+    (m, pop)
+}
 unsafe fn make_menus() -> Menus {
     let mut m = Menus::new();
     let groups: [(&str, Vec<(u16, &str)>); 6] = [
@@ -2235,11 +2718,21 @@ unsafe fn make_menus() -> Menus {
         m.add(
             colors,
             (COLOR_BASE + i as u16) as usize,
-            &format!("{name}\tCtrl+Alt+{}", i),
+            &format!("{name}\tCtrl+Alt+{}", document::TAB_COLOR_KEYS[i] as char),
             false,
         );
     }
     m.add(tab_menu, colors as usize, "Tab &color", true);
+    let contexts = m.popup();
+    for context in Context::ALL {
+        m.add(
+            contexts,
+            (CONTEXT_BASE + context as u16) as usize,
+            &format!("{}\tCtrl+Alt+Shift+{}", context.label(), context as u8),
+            false,
+        );
+    }
+    m.add(tools_menu, contexts as usize, "&Context (this tab)", true);
     let hl = m.popup();
     for (id, text) in [
         (CLEAR, "&Remove highlight\tCtrl+0"),
@@ -2341,11 +2834,18 @@ fn accelerators() -> Vec<ACCEL> {
             cmd,
         })
         .collect();
-    for i in 0..7 {
+    for (i, key) in document::TAB_COLOR_KEYS.iter().enumerate() {
         accels.push(ACCEL {
             fVirt: ca,
-            key: b'0' as u16 + i,
-            cmd: COLOR_BASE + i,
+            key: *key as u16,
+            cmd: COLOR_BASE + i as u16,
+        });
+    }
+    for context in Context::ALL {
+        accels.push(ACCEL {
+            fVirt: ca | FSHIFT,
+            key: b'0' as u16 + context as u16,
+            cmd: CONTEXT_BASE + context as u16,
         });
     }
     accels
