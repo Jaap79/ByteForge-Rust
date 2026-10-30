@@ -5,6 +5,7 @@ mod qa;
 mod syntax;
 use byteforge_rust::{
     document::{self, Document, Highlight, HIGHLIGHTS, MAX_TABS, TAB_COLORS},
+    instance,
     session::{self, Session},
     storage,
     syntax::Context,
@@ -82,6 +83,7 @@ const CLOSE_TAB_AT: u32 = WM_APP + 5;
 const TAB_CONTEXT: u32 = WM_APP + 6;
 const MOVE_TAB: u32 = WM_APP + 7;
 const SYNTAX_VIEW: u32 = WM_APP + 8;
+const OPEN_EXTERNAL: u32 = WM_APP + 9;
 const SYNTAX_TIMER: usize = 2;
 const CONTEXT_BASE: u16 = 340;
 #[derive(Clone, Copy)]
@@ -162,7 +164,9 @@ pub fn run() {
                 .and_then(|i| args.get(i + 1))
                 .map(PathBuf::from)
         };
-        let qa = option("--ui-self-test").or_else(|| option("--verify-recovery"));
+        let qa = option("--ui-self-test")
+            .or_else(|| option("--verify-recovery"))
+            .or_else(|| option("--verify-explorer"));
         let dir = option("--session-dir").unwrap_or_else(|| {
             qa.as_ref()
                 .map(|p| p.join("session"))
@@ -186,8 +190,23 @@ pub fn run() {
             .open(dir.join("session.lock"))
         {
             Ok(lock) => lock,
-            Err(_) => {
-                MessageBoxW(null_mut(),wide("This session is already open in another ByteForge Rust window. Use a different --session-dir for an independent workspace.").as_ptr(),wide("ByteForge Rust").as_ptr(),MB_OK);
+            Err(e) => {
+                let sharing = matches!(e.raw_os_error(), Some(32 | 33));
+                let result = if sharing && qa.is_none() {
+                    instance::command_paths(&args).and_then(|paths| {
+                        instance::forward(&dir, &paths, !args.iter().any(|a| a == "--hidden"))
+                    })
+                } else {
+                    Err(format!("Cannot open the recovery session: {e}"))
+                };
+                if let Err(e) = result {
+                    MessageBoxW(
+                        null_mut(),
+                        wide(&e).as_ptr(),
+                        wide("ByteForge Rust").as_ptr(),
+                        MB_OK | MB_ICONERROR,
+                    );
+                }
                 return;
             }
         };
@@ -214,7 +233,7 @@ pub fn run() {
         let hwnd = CreateWindowExW(
             WS_EX_ACCEPTFILES,
             class.as_ptr(),
-            wide("ByteForge Rust 1.2.0").as_ptr(),
+            wide("ByteForge Rust 1.2.1").as_ptr(),
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -226,6 +245,16 @@ pub fn run() {
             null(),
         );
         if hwnd.is_null() {
+            return;
+        }
+        if let Err(e) = instance::install(hwnd, &dir) {
+            MessageBoxW(
+                hwnd,
+                wide(&e).as_ptr(),
+                wide("ByteForge Rust").as_ptr(),
+                MB_OK | MB_ICONERROR,
+            );
+            DestroyWindow(hwnd);
             return;
         }
         set_ui_font(GetDpiForWindow(hwnd).max(96));
@@ -277,24 +306,17 @@ pub fn run() {
             qa::OUTPUT.with(|o| *o.borrow_mut() = Some(dir));
             PostMessageW(hwnd, RUN_QA, 0, 0);
         } else {
-            let mut skip = false;
-            for arg in args {
-                if skip {
-                    skip = false;
-                    continue;
+            match instance::command_paths(&args) {
+                Ok(paths) => {
+                    for path in paths {
+                        APP.with(|a| {
+                            if let Some(app) = a.borrow_mut().as_mut() {
+                                app.open(&path);
+                            }
+                        });
+                    }
                 }
-                if arg == "--session-dir" {
-                    skip = true;
-                    continue;
-                }
-                if !arg.to_string_lossy().starts_with("--") {
-                    let path = PathBuf::from(arg);
-                    APP.with(|a| {
-                        if let Some(app) = a.borrow_mut().as_mut() {
-                            app.open(&path);
-                        }
-                    });
-                }
+                Err(e) => error(hwnd, &e),
             }
             PostMessageW(hwnd, INIT, 0, 0);
         }
@@ -378,6 +400,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: usize, lp: isize) ->
         return r;
     }
     match msg {
+        WM_COPYDATA => return instance::receive(hwnd, lp, OPEN_EXTERNAL),
         WM_MEASUREITEM => return measure_menu(lp),
         WM_DRAWITEM => {
             let d = &*(lp as *const DRAWITEMSTRUCT);
@@ -401,6 +424,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: usize, lp: isize) ->
             return 1;
         }
         WM_DESTROY => {
+            instance::uninstall(hwnd);
             PostQuitMessage(0);
             return 0;
         }
@@ -493,6 +517,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: usize, lp: isize) ->
                 }
                 Some(0)
             }
+            OPEN_EXTERNAL => {
+                app.open_external();
+                Some(0)
+            }
             MOVE_TAB => {
                 app.move_tab(wp, lp as usize);
                 Some(0)
@@ -502,12 +530,16 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: usize, lp: isize) ->
                 Some(0)
             }
             WM_CLOSE => {
+                app.open_external();
                 if app.close_app() {
                     DestroyWindow(hwnd);
                 }
                 Some(0)
             }
-            WM_QUERYENDSESSION => Some(app.snapshot().is_ok() as isize),
+            WM_QUERYENDSESSION => {
+                app.open_external();
+                Some(app.snapshot().is_ok() as isize)
+            }
             WM_ENDSESSION => {
                 if wp != 0 {
                     let _ = app.snapshot();
@@ -1381,6 +1413,7 @@ impl App {
         Ok(())
     }
     unsafe fn tick(&mut self) {
+        self.open_external();
         self.capture(self.active);
         self.update_title();
         if let Err(e) = self.snapshot() {
@@ -1400,7 +1433,7 @@ impl App {
                 self.update = None;
                 match result {
                     Ok(v) => {
-                        prompt(self.hwnd,"Upstream version",&format!("Rust edition: 1.2.0\nFASM upstream: {v}\n\nThis is the original FASM feed, not an update channel for this Rust edition.\nhttps://github.com/Jaap79/ByteForge"),None,&["OK"]);
+                        prompt(self.hwnd,"Upstream version",&format!("Rust edition: 1.2.1\nFASM upstream: {v}\n\nThis is the original FASM feed, not an update channel for this Rust edition.\nhttps://github.com/Jaap79/ByteForge"),None,&["OK"]);
                     }
                     Err(e) => error(self.hwnd, &e),
                 }
@@ -1418,7 +1451,7 @@ impl App {
         set_text(
             self.hwnd,
             &format!(
-                "{}{} — ByteForge Rust 1.2.0",
+                "{}{} — ByteForge Rust 1.2.1",
                 if tab.doc.dirty { "* " } else { "" },
                 path
             ),
@@ -1730,6 +1763,30 @@ impl App {
                 self.invalidate_results();
             }
             Err(e) => error(self.hwnd, &format!("{}\n\n{e}", path.display())),
+        }
+    }
+    unsafe fn open_external(&mut self) {
+        // Modal code can consume the wake while App is borrowed. Requests stay
+        // queued; the normal timer retries after the owner is enabled again.
+        if IsWindowEnabled(self.hwnd) == 0 {
+            return;
+        }
+        while let Some(request) = instance::take() {
+            for path in request.paths {
+                self.open(&path);
+            }
+            if request.activate {
+                ShowWindow(
+                    self.hwnd,
+                    if IsIconic(self.hwnd) != 0 {
+                        SW_RESTORE
+                    } else {
+                        SW_SHOW
+                    },
+                );
+                SetForegroundWindow(self.hwnd);
+                SetFocus(self.edit());
+            }
         }
     }
     unsafe fn save(&mut self, index: usize, save_as: bool) -> bool {
@@ -2467,7 +2524,7 @@ impl App {
                 }
             }
             ABOUT => {
-                prompt(self.hwnd,"About ByteForge Rust","ByteForge Rust 1.2.0\nNative Win32 / RichEdit — Rust edition\nForked from ByteForge 1.0.0.10 (a401721).\n\nDraggable tabs, per-tab syntax contexts, cross-tab search and recovery.\nRecovery stores readable text in your local profile.\n\nBugs / security: jaapengel79@proton.me",None,&["OK"]);
+                prompt(self.hwnd,"About ByteForge Rust","ByteForge Rust 1.2.1\nNative Win32 / RichEdit — Rust edition\nForked from ByteForge 1.0.0.10 (a401721).\n\nDraggable tabs, per-tab syntax contexts, cross-tab search and recovery.\nRecovery stores readable text in your local profile.\n\nBugs / security: jaapengel79@proton.me",None,&["OK"]);
             }
             423 | 424 => self.invalidate_results(),
             _ => {}

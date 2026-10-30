@@ -1,6 +1,6 @@
 {
-  "version": "1.2.0.0",
-  "display": "ByteForge Rust 1.2.0",
+  "version": "1.2.1.0",
+  "display": "ByteForge Rust 1.2.1",
   "edition": "rust",
   "channel": "preview",
   "repository": "https://github.com/Jaap79/ByteForge-Rust",

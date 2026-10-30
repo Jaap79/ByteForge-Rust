@@ -1,6 +1,18 @@
-# Validation — ByteForge Rust 1.2.0
+# Validation — ByteForge Rust 1.2.1
 
-## Current 1.2.0 build — 30 October 2026
+## Current 1.2.1 build — 30 October 2026
+
+- Path: `dist/ByteForge-Rust.exe`; size: 553,984 bytes (541 KiB); Windows FileVersion/ProductVersion: `1.2.1.0`.
+- SHA-256: `2FBBF71ECAEB1EF605669DA0685515AD23AAEF3E52F935FC4116FA2BBFD4172F`.
+- Format check, **17 unit/model/storage tests**, Clippy with warnings denied and optimized release build passed.
+- **116 native UI integration checks** and **10 process-stop/restart checks** passed, including file handoff accepted while the modal owner is disabled and subsequent existing-tab selection without changing unsaved buffers. Evidence: `output/qa-20261030-153007-312/`.
+- `tests/explorer-open.ps1` passed real multi-process launches: multiple files in one request, later separate launches, spaces/Unicode names, relative caller paths, duplicate-path selection, empty/bare launch, startup timing, case/relative session-directory aliases and workspace isolation. Each secondary process exited promptly instead of blocking on the old warning. Restart verification passed **five primary-workspace checks** and **three isolation-workspace checks**, reading back actual live editor contents and original unsaved buffers/settings. Evidence: `output/explorer-20261030-153031-172/checks.txt`, `verify-primary/result.txt`, `verify-isolation/result.txt`.
+- The same complete multi-process test also passed on the replaced canonical executable: `output/explorer-20261030-153313-843/checks.txt`, `verify-primary/result.txt`, `verify-isolation/result.txt`.
+- Protocol tests cover every truncation of a valid message, trailing/oversized/malformed input, unknown flags, relative-path rejection and lossless Windows UTF-16 paths. Requests are bounded and are not executed as commands.
+- Computer Use observed an isolated visible window with one file; launching the canonical executable with two more file arguments added both tabs to that same window and displayed the final file correctly, in dark and light modes. This verifies the same executable launch path used by Explorer without changing associations. Actual Explorer Open With/default-association UI was not changed or used as proof of registry configuration.
+- The pre-existing Rust processes were left untouched. After the user closed them, the canonical executable was replaced with the verified build at the same path; no registry, user documents or original FASM installation was changed. The design-language palette/native chrome is retained with no new UI surface or runtime dependency. Source, executable and regression tests are distributed together through the repository.
+
+## Previous 1.2.0 build — 30 October 2026
 
 - Path: `dist/ByteForge-Rust.exe`; size: 536,064 bytes (523.5 KiB); Windows FileVersion/ProductVersion: `1.2.0.0`.
 - SHA-256: `29A17D46A4F2FAF8ED7A66C25FFC72246E75EBEA887A116B403070788B99C2BA`.

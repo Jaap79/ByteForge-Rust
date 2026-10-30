@@ -1,14 +1,16 @@
-# ByteForge Rust 1.2.0
+# ByteForge Rust 1.2.1
 
 Native Windows text editor with colored tabs, independent tab settings, cross-tab search and session recovery. This is a separate Rust edition forked from ByteForge 1.0.0.10 at `a401721`; the original FASM repository is unchanged. Original source and binary are retained in `legacy/` and the Git history is preserved.
 
 Repository: [Jaap79/ByteForge-Rust](https://github.com/Jaap79/ByteForge-Rust). The current executable is included under `dist/`; this preview does not yet have a separate GitHub Release or automatic Rust update feed.
 
-Run **`dist/ByteForge-Rust.exe`** (1.2.0). Close any old instance before opening the new one with the same recovery workspace. One self-contained executable; only standard Windows DLLs are needed. No browser, WebView, .NET, PowerShell installation, sidecar grammar files or installed Rust runtime is required.
+Run **`dist/ByteForge-Rust.exe`** (1.2.1). Close any old instance once when upgrading so the executable can be replaced. One self-contained executable; only standard Windows DLLs are needed. No browser, WebView, .NET, PowerShell installation, sidecar grammar files or installed Rust runtime is required.
 
 ## Tabs and editing
 
 Each tab has its own document, undo/redo buffer, file path, encoding, line endings, color, font family/size, zoom, word wrap, selection, scroll position and highlights. Untitled scratch tabs have unique names. Open, command-line files and drag/drop open additional tabs; reopening a path selects its existing tab. Closing an unsaved tab asks Save/Discard/Cancel.
+
+Files opened through Explorer/Open With are handed off to the existing ByteForge window as tabs, including multiple files and repeated separate launches. Opening an already-open path selects its existing tab; it does not reload or discard its unsaved contents. Starting ByteForge again without files brings the existing window forward. `--session-dir` workspaces remain independent and retain exclusive recovery ownership. A busy modal prompt queues incoming files until it is dismissed. A receiver running an older version or at an incompatible elevation level produces a clear failure instead of silently dropping files. Run the editor at the same normal permission level as Explorer; no association or registry changes are made by the application.
 
 The **+** directly after the last tab opens a blank tab; each tab has its own **×** close target. Drag a tab to change the order; the orange insertion marker previews its destination. Moving retains the editor, contents, selection, undo/redo, font, color and context. Ctrl+Alt+Left/Right also reorders tabs. When tabs overflow, native scroll arrows remain available and the plus stays reachable. Right-click any tab for **Tabkleur** and **Tabblad sluiten**, without switching away from the current document. The palette has eleven choices, including Cyan, Pink, Teal and Gray. Editor right-click actions group highlight colors and removal under **Tekstmarkering**.
 
@@ -78,11 +80,12 @@ Ctrl+W now closes a tab; word wrap moved to Alt+Z. The manual upstream check exp
 
 ## Build and verify
 
-Rust Windows GNU toolchain; one pinned dependency, `windows-sys = 0.59.0`. `build.rs` embeds the geometric ByteForge-family icon, DPI manifest and Windows version resource without a resource compiler. Version: 1.2.0 / PE 1.2.0.0.
+Rust Windows GNU toolchain; one pinned dependency, `windows-sys = 0.59.0`. `build.rs` embeds the geometric ByteForge-family icon, DPI manifest and Windows version resource without a resource compiler. Version: 1.2.1 / PE 1.2.1.0.
 
 ```powershell
 .\scripts\build.ps1 -Test -Clippy
 .\tests\ui-smoke.ps1
+.\tests\explorer-open.ps1
 ```
 
 For a side-by-side build while the default executable is running:

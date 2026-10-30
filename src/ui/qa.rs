@@ -118,7 +118,9 @@ pub unsafe fn run(app: &mut App) {
     let output = OUTPUT.with(|o| o.borrow().clone()).unwrap();
     let _ = fs::create_dir_all(&output);
     let verify = std::env::args_os().any(|a| a == "--verify-recovery");
-    let result = if verify {
+    let result = if std::env::args_os().any(|a| a == "--verify-explorer") {
+        verify_explorer(app, &output)
+    } else if verify {
         verify_recovery(app)
     } else {
         exercise(app, &output)
@@ -197,6 +199,53 @@ unsafe fn verify_recovery(app: &mut App) -> Result<usize, String> {
         return Err("Search across restored live controls failed".into());
     }
     Ok(10)
+}
+unsafe fn verify_explorer(app: &mut App, output: &Path) -> Result<usize, String> {
+    let manifest = fs::read_to_string(output.join("expected.txt")).map_err(|e| e.to_string())?;
+    let mut lines = manifest.lines();
+    let count: usize = lines
+        .next()
+        .unwrap_or("")
+        .parse()
+        .map_err(|_| "Invalid Explorer QA manifest")?;
+    if app.documents.len() != count {
+        return Err(format!(
+            "Expected {count} tabs after handoff, got {}",
+            app.documents.len()
+        ));
+    }
+    let baseline = lines.next() == Some("baseline");
+    let mut checks = 1;
+    if baseline {
+        if app.documents[0].doc.text != "alpha café 😀\nneedle first\nneedle again"
+            || !app.documents[0].doc.dirty
+            || app.documents[0].doc.font != "Georgia"
+            || app.documents[0].doc.context != Context::Json
+            || !app.documents[1].doc.text.contains("second tab")
+            || app.documents[1].doc.context != Context::PowerShell
+        {
+            return Err("File handoff changed existing unsaved text or per-tab settings".into());
+        }
+        checks += 1;
+    }
+    for name in lines {
+        let Some(tab) = app.documents.iter().find(|t| {
+            t.doc
+                .path
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .is_some_and(|n| n == name)
+        }) else {
+            return Err(format!("Missing Explorer tab: {name}"));
+        };
+        if tab.doc.text != format!("fixture: {name}")
+            || document::normalize(&raw_text(tab.edit)) != tab.doc.text
+        {
+            return Err(format!("Wrong live contents for {name}"));
+        }
+        checks += 1;
+    }
+    Ok(checks)
 }
 unsafe fn exercise(app: &mut App, output: &Path) -> Result<usize, String> {
     let mut checks = vec![];
@@ -884,6 +933,21 @@ unsafe fn exercise(app: &mut App, output: &Path) -> Result<usize, String> {
     app.activate(1);
     app.command(CONTEXT_BASE + Context::PowerShell as u16);
     app.documents[0].doc.context = Context::Json;
+    let before = app.documents.len();
+    EnableWindow(app.hwnd, 0);
+    instance::forward(&app.dir, std::slice::from_ref(&file), false)?;
+    app.open_external();
+    check!(
+        app.documents.len() == before && app.active == 1,
+        "File-open handoff queues safely while the owner has a modal prompt"
+    );
+    EnableWindow(app.hwnd, 1);
+    app.open_external();
+    check!(
+        app.documents.len() == before && app.active == 2 && app.documents[0].doc.dirty,
+        "Deferred file handoff selects an existing tab without losing unsaved buffers"
+    );
+    app.activate(1);
     app.disable_recovery()?;
     check!(
         app.dir.join("recovery.off").exists() && !app.dir.join("session.bfs").exists(),

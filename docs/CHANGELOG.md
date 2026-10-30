@@ -1,5 +1,12 @@
 # Changelog
 
+## Rust edition 1.2.1
+
+- Hand off Explorer/Open With and command-line file launches to the current workspace's existing window instead of showing the session-lock warning.
+- Support multiple paths, spaces/Unicode names, caller-relative paths, startup races, reopening existing tabs without replacing unsaved buffers, and bringing the window forward on a bare launch.
+- Keep the exclusive session lock and independent workspaces. Bound/validate the local file-open protocol and defer opening while a modal prompt owns the UI.
+- Add real multi-process regression coverage and session restart verification; no registry association changes, network service, dependency or extra runtime is introduced.
+
 ## Rust edition 1.2.0
 
 - Position the plus button immediately after the last tab, retaining native overflow controls without spurious arrows when all tabs fit.
