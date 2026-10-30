@@ -1,6 +1,20 @@
 use super::*;
 thread_local! {pub static OUTPUT:RefCell<Option<PathBuf>>=const{RefCell::new(None)};}
 thread_local! {static RECEIVED:std::cell::Cell<u16>=const{std::cell::Cell::new(0)};}
+unsafe fn foreground(hwnd: HWND, r: Range) -> u32 {
+    let original = range(hwnd);
+    set_range(hwnd, r);
+    let mut cf: CharFormat = zeroed();
+    cf.size = size_of::<CharFormat>() as u32;
+    SendMessageW(hwnd, 0x43a, 1, &mut cf as *mut _ as isize);
+    set_range(hwnd, original);
+    cf.color
+}
+unsafe fn window_rect(hwnd: HWND) -> RECT {
+    let mut r: RECT = zeroed();
+    GetWindowRect(hwnd, &mut r);
+    r
+}
 unsafe extern "system" fn accelerator_probe(hwnd: HWND, msg: u32, wp: usize, lp: isize) -> isize {
     if msg == WM_COMMAND {
         RECEIVED.set((wp & 65535) as u16);
@@ -294,6 +308,90 @@ unsafe fn exercise(app: &mut App, output: &Path) -> Result<usize, String> {
         raw_text(app.hex).contains("61 6C 70 68 61"),
         "Hex viewer encodes active buffer"
     );
+    check!(
+        foreground(app.hex, Range { start: 0, end: 6 }) == palette().text,
+        "Hex viewer uses light foreground in dark mode"
+    );
+    let mut hex_cf: CharFormat = zeroed();
+    hex_cf.size = size_of::<CharFormat>() as u32;
+    SendMessageW(app.hex, 0x43a, 0, &mut hex_cf as *mut _ as isize);
+    let hex_face = String::from_utf16_lossy(
+        &hex_cf.face[..hex_cf.face.iter().position(|c| *c == 0).unwrap_or(32)],
+    );
+    check!(
+        hex_face == "Consolas" && hex_cf.height == 180 && app.hex_font != app.documents[0].font,
+        format!(
+            "Hex viewer renders its own 9pt monospace font (face={hex_face}, height={})",
+            hex_cf.height
+        )
+    );
+    for dark in [false, true] {
+        if DARK.get() != dark {
+            app.command(DARK_MODE);
+        }
+        for choice in [FONT_SEGOE, FONT_CONSOLAS, FONT_GEORGIA] {
+            app.command(choice);
+            check!(
+                foreground(app.edit(), Range { start: 8, end: 10 }) == palette().text,
+                format!("Font switch keeps editor foreground in mode dark={dark}")
+            );
+            check!(
+                foreground(app.edit(), Range { start: 0, end: 5 }) == palette().text,
+                format!("Highlighted text follows foreground in mode dark={dark}")
+            );
+            check!(
+                foreground(app.hex, Range { start: 0, end: 6 }) == palette().text,
+                format!("Hex foreground survives editor font change in mode dark={dark}")
+            );
+        }
+    }
+    // Font choices reset font size but must not affect this tab's independent zoom.
+    let before_hex = raw_text(app.hex);
+    let original_text = app.documents[0].doc.text.clone();
+    let original_range = range(app.edit());
+    set_range(app.edit(), Range { start: -1, end: -1 });
+    SendMessageW(app.edit(), EM_REPLACESEL, 1, wide("!").as_ptr() as isize);
+    app.editor_changed(app.edit());
+    check!(
+        app.hex_refresh_queued,
+        "Typing queues a live hex refresh immediately"
+    );
+    app.flush_hex_refresh();
+    check!(
+        raw_text(app.hex) != before_hex && raw_text(app.hex).contains("21 "),
+        "Queued hex refresh displays newly typed bytes without reopening the view"
+    );
+    app.command(UNDO);
+    check!(
+        app.documents[0].doc.text == original_text && raw_text(app.hex) == before_hex,
+        "Undo refreshes hex back to original bytes"
+    );
+    set_range(app.edit(), original_range);
+    app.hits.clear();
+    app.layout();
+    check!(
+        GetWindowLongPtrW(app.results, GWL_STYLE) & WS_VISIBLE as isize == 0,
+        "Empty search results do not reserve a blank panel"
+    );
+    for mode in [HEX_LEFT, HEX_RIGHT, HEX_BELOW] {
+        app.command(mode);
+        let editor = window_rect(app.edit());
+        let hex = window_rect(app.hex);
+        let editor_header = window_rect(app.editor_label);
+        let hex_header = window_rect(app.hex_label);
+        check!(
+            editor.top == editor_header.bottom && hex.top == hex_header.bottom,
+            "Each split pane has a distinct header"
+        );
+        check!(
+            match mode {
+                HEX_LEFT => hex.right < editor.left && hex.top == editor.top,
+                HEX_RIGHT => editor.right < hex.left && hex.top == editor.top,
+                _ => editor.bottom < hex_header.top,
+            },
+            "Hex and editor panes have a visible non-overlapping divider"
+        );
+    }
     app.command(HEX_CLOSE);
     let file = output.join("utf16.txt");
     let bytes = [

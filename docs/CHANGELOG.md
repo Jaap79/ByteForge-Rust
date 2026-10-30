@@ -1,5 +1,13 @@
 # Changelog
 
+## Rust edition 1.1.2
+
+- Refresh the visible hex preview immediately after editor changes, undo/redo and replacing text; coalesce native change notifications and preserve hex scroll/selection when refreshing.
+- Give the hex viewer its own 9pt Consolas font, independent of per-tab fonts, zoom and font-handle lifetime.
+- Restore theme foreground colors after font changes; use light text throughout dark mode and dark text in light mode. Highlights use deeper dark-mode backgrounds while preserving logical session colors.
+- Separate editor and hex panes with labeled headers and a visible gap; adapt hex rows to 4/8/16 bytes for available width and collapse empty search results.
+- Verify 74 native UI checks and nine process-stop/restart recovery checks, plus seven model/storage tests.
+
 ## Rust edition 1.1.1
 
 - Apply the current dark/light editor background immediately when creating any tab, including New and Open.

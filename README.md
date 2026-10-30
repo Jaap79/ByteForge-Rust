@@ -1,4 +1,4 @@
-# ByteForge Rust 1.1.1
+# ByteForge Rust 1.1.2
 
 Native Windows text editor with colored tabs, independent tab settings, cross-tab search and session recovery. This is a local Rust fork of ByteForge 1.0.0.10 at `a401721`; the original FASM repository is unchanged. Original source and binary are retained in `legacy/` and the Git history is preserved.
 
@@ -8,7 +8,9 @@ Run **`dist/ByteForge-Rust.exe`**. One executable is distributed; only standard 
 
 Each tab has its own document, undo/redo buffer, file path, encoding, line endings, color, font family/size, zoom, word wrap, selection, scroll position and highlights. Untitled scratch tabs have unique names. Open, command-line files and drag/drop open additional tabs; reopening a path selects its existing tab. Closing an unsaved tab asks Save/Discard/Cancel.
 
-UTF-8, UTF-8 BOM, UTF-16LE BOM and UTF-16BE BOM are supported. Encoding and CRLF/LF/CR preference are preserved on save. Invalid Unicode and binary/NUL-containing input are rejected without replacing an open document. Plain-text files never receive highlight/font metadata. MD5/SHA-256 comparison, file info, jump-to-line, clipboard editing and hex preview are retained. The hex preview shows the active buffer's encoded bytes, limited to 64 KiB.
+UTF-8, UTF-8 BOM, UTF-16LE BOM and UTF-16BE BOM are supported. Encoding and CRLF/LF/CR preference are preserved on save. Invalid Unicode and binary/NUL-containing input are rejected without replacing an open document. Plain-text files never receive highlight/font metadata. MD5/SHA-256 comparison, file info, jump-to-line, clipboard editing and hex preview are retained. The hex preview shows the active buffer's encoded bytes, limited to 64 KiB, and updates as you edit, undo or replace text. Its independent 9pt monospace font keeps the columns aligned when tab fonts change. Labeled panes adapt to left/right/below layout, and hex rows use 4, 8 or 16 bytes according to the available width.
+
+Text follows the active theme after font changes: light in dark mode, dark in light mode. Highlight backgrounds have deeper shades in dark mode so light letters remain readable; the original logical highlight colors are retained in session storage.
 
 ## Search
 
@@ -60,7 +62,7 @@ Ctrl+W now closes a tab; word wrap moved to Alt+Z. The manual upstream check exp
 
 ## Build and verify
 
-Rust Windows GNU toolchain; one pinned dependency, `windows-sys = 0.59.0`. `build.rs` embeds the geometric ByteForge-family icon, DPI manifest and Windows version resource without a resource compiler. Version: 1.1.1 / PE 1.1.1.0.
+Rust Windows GNU toolchain; one pinned dependency, `windows-sys = 0.59.0`. `build.rs` embeds the geometric ByteForge-family icon, DPI manifest and Windows version resource without a resource compiler. Version: 1.1.2 / PE 1.1.2.0.
 
 ```powershell
 .\scripts\build.ps1 -Test -Clippy

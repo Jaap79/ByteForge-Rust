@@ -75,6 +75,7 @@ const DO_REPLACE_ALL: u16 = 414;
 const INIT: u32 = WM_APP + 1;
 const RUN_QA: u32 = WM_APP + 2;
 const ACTIVE_TAB: u32 = WM_APP + 3;
+const REFRESH_HEX: u32 = WM_APP + 4;
 fn tab_stripe_height(active: bool) -> i32 {
     if active {
         8
@@ -103,6 +104,11 @@ struct App {
     tabs: HWND,
     status: HWND,
     hex: HWND,
+    hex_label: HWND,
+    editor_label: HWND,
+    hex_font: HFONT,
+    hex_rendered: RefCell<String>,
+    hex_refresh_queued: bool,
     search: HWND,
     query: HWND,
     replace: HWND,
@@ -189,7 +195,7 @@ pub fn run() {
         let hwnd = CreateWindowExW(
             WS_EX_ACCEPTFILES,
             class.as_ptr(),
-            wide("ByteForge Rust 1.1.1").as_ptr(),
+            wide("ByteForge Rust 1.1.2").as_ptr(),
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -329,6 +335,7 @@ pub fn run() {
                 for tab in app.documents.drain(..) {
                     DeleteObject(tab.font);
                 }
+                DeleteObject(app.hex_font);
                 DestroyMenu(app.menus.root);
             }
         });
@@ -398,6 +405,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: usize, lp: isize) ->
                 for i in 0..app.documents.len() {
                     app.apply_font(i);
                 }
+                let old = app.hex_font;
+                app.hex_font = font("Consolas", 9, app.dpi);
+                SendMessageW(app.hex, WM_SETFONT, app.hex_font as usize, 0);
+                DeleteObject(old);
                 app.apply_theme();
                 app.layout();
                 Some(0)
@@ -423,9 +434,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: usize, lp: isize) ->
                     if id == 420 || id == 422 {
                         app.invalidate_results();
                     }
-                    if let Some(tab) = app.documents.iter_mut().find(|t| t.edit == lp as HWND) {
-                        tab.changed = true;
-                    }
+                    app.editor_changed(lp as HWND);
                 } else if id == 421 && notification == LBN_DBLCLK as u16 {
                     let n = SendMessageW(app.results, LB_GETCURSEL, 0, 0);
                     if n >= 0 {
@@ -438,6 +447,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: usize, lp: isize) ->
             }
             WM_TIMER => {
                 app.tick();
+                Some(0)
+            }
+            REFRESH_HEX => {
+                app.flush_hex_refresh();
                 Some(0)
             }
             WM_CLOSE => {
@@ -696,6 +709,13 @@ impl App {
             402,
             ES_MULTILINE as u32 | ES_READONLY as u32 | WS_VSCROLL | WS_HSCROLL,
         );
+        let hex_font = font("Consolas", 9, GetDpiForWindow(hwnd).max(96));
+        SendMessageW(hex, WM_SETFONT, hex_font as usize, 0);
+        SendMessageW(hex, 0x448, 0, 1); // No wrapping: hex columns must stay aligned.
+        let hex_label = child(hwnd, "STATIC", "  HEX — live buffer", 403, SS_LEFT);
+        let editor_label = child(hwnd, "STATIC", "  EDITOR", 404, SS_LEFT);
+        ShowWindow(hex_label, SW_HIDE);
+        ShowWindow(editor_label, SW_HIDE);
         SendMessageW(hex, EM_SETREADONLY, 1, 0);
         let query = child(
             hwnd,
@@ -767,6 +787,11 @@ impl App {
             tabs,
             status,
             hex,
+            hex_label,
+            editor_label,
+            hex_font,
+            hex_rendered: RefCell::new(String::new()),
+            hex_refresh_queued: false,
             search,
             query,
             replace,
@@ -874,9 +899,6 @@ impl App {
         });
         self.invalidate_results();
         self.apply_font(self.documents.len() - 1);
-        // WM_SETFONT can restore RichEdit's automatic/default foreground. Apply
-        // theme text colors afterwards, preserving restored highlight ranges.
-        recolor_raw(edit);
         self.set_wrap(self.documents.len() - 1);
         let scroll = self.documents.last().unwrap().doc.scroll;
         let pt = POINT {
@@ -921,7 +943,27 @@ impl App {
         tab.doc.scroll = (pt.x, pt.y);
         if edited {
             self.invalidate_results();
+            if index == self.active {
+                self.refresh_hex();
+            }
         }
+    }
+    unsafe fn editor_changed(&mut self, hwnd: HWND) {
+        if let Some(tab) = self.documents.iter_mut().find(|t| t.edit == hwnd) {
+            tab.changed = true;
+        }
+        if hwnd == self.edit()
+            && self.documents[self.active].doc.hex != 0
+            && !self.hex_refresh_queued
+        {
+            self.hex_refresh_queued = true;
+            PostMessageW(self.hwnd, REFRESH_HEX, 0, 0);
+        }
+    }
+    unsafe fn flush_hex_refresh(&mut self) {
+        self.hex_refresh_queued = false;
+        self.capture(self.active);
+        self.update_title();
     }
     unsafe fn capture_highlights(&mut self, index: usize) {
         let tab = &mut self.documents[index];
@@ -952,7 +994,7 @@ impl App {
                     end: mid,
                 });
             } else if cf.effects & 0x04000000 == 0 {
-                let color = rgb(cf.back);
+                let color = logical_highlight(cf.back);
                 if let Some(last) = spans.last_mut() {
                     if last.end == r.start && last.color == color {
                         last.end = r.end;
@@ -1021,7 +1063,7 @@ impl App {
                 self.update = None;
                 match result {
                     Ok(v) => {
-                        prompt(self.hwnd,"Upstream version",&format!("Rust edition: 1.1.1\nFASM upstream: {v}\n\nThis is the original FASM feed, not an update channel for this Rust edition.\nhttps://github.com/Jaap79/ByteForge"),None,&["OK"]);
+                        prompt(self.hwnd,"Upstream version",&format!("Rust edition: 1.1.2\nFASM upstream: {v}\n\nThis is the original FASM feed, not an update channel for this Rust edition.\nhttps://github.com/Jaap79/ByteForge"),None,&["OK"]);
                     }
                     Err(e) => error(self.hwnd, &e),
                 }
@@ -1039,7 +1081,7 @@ impl App {
         set_text(
             self.hwnd,
             &format!(
-                "{}{} — ByteForge Rust 1.1.1",
+                "{}{} — ByteForge Rust 1.1.2",
                 if tab.doc.dirty { "* " } else { "" },
                 path
             ),
@@ -1082,8 +1124,8 @@ impl App {
     unsafe fn layout(&self) {
         let mut r: RECT = zeroed();
         GetClientRect(self.hwnd, &mut r);
-        let width = r.right;
-        let height = r.bottom;
+        let width = r.right.max(0);
+        let height = r.bottom.max(0);
         let s = |n| self.scale(n);
         MoveWindow(self.tabs, 0, 0, width, s(36), 1);
         SendMessageW(
@@ -1118,39 +1160,74 @@ impl App {
                 MoveWindow(h, s(x), s(y), s(w).min((width - s(x) - 4).max(0)), s(ht), 1);
             }
         }
-        let result_h = if self.search_visible {
-            s(150).min((height - top) / 3)
+        let available = (height - s(26) - top).max(0);
+        let result_h = if self.search_visible && !self.hits.is_empty() {
+            s(150).min(available / 3)
         } else {
             0
         };
+        ShowWindow(self.results, if result_h > 0 { SW_SHOW } else { SW_HIDE });
         let bottom = (height - s(26) - result_h).max(top);
-        if self.search_visible {
+        if result_h > 0 {
             MoveWindow(self.results, 0, bottom, width, result_h, 1);
         }
-        let (mut x, mut y, mut w, mut h) = (0, top, width, (bottom - top).max(0));
+        let h = (bottom - top).max(0);
         let mode = self.documents[self.active].doc.hex;
-        if mode != 0 {
-            ShowWindow(self.hex, SW_SHOW);
-            if mode == 3 {
-                let hex_h = h / 3;
-                MoveWindow(self.hex, 0, y + h - hex_h, w, hex_h, 1);
-                h -= hex_h;
-            } else {
-                let hex_w = w / 2;
-                if mode == 1 {
-                    MoveWindow(self.hex, 0, y, hex_w, h, 1);
-                    x = hex_w;
-                } else {
-                    MoveWindow(self.hex, hex_w, y, hex_w, h, 1);
-                }
-                w -= hex_w;
-            }
-        } else {
-            ShowWindow(self.hex, SW_HIDE);
+        for label in [self.hex_label, self.editor_label] {
+            ShowWindow(label, if mode == 0 { SW_HIDE } else { SW_SHOW });
         }
-        // Prevent a negative result when minimized.
-        y = y.max(0);
-        MoveWindow(self.edit(), x, y, w, h, 1);
+        if mode == 0 {
+            ShowWindow(self.hex, SW_HIDE);
+            MoveWindow(self.edit(), 0, top, width, h, 1);
+            return;
+        }
+        let gap = s(8).min(h).min(width);
+        let header = s(24);
+        let (ex, ey, ew, eh, hx, hy, hw, hh) = if mode == 3 {
+            let hex_h = (h - gap) * 2 / 5;
+            (
+                0,
+                top,
+                width,
+                h - gap - hex_h,
+                0,
+                top + h - hex_h,
+                width,
+                hex_h,
+            )
+        } else {
+            let left = (width - gap) / 2;
+            let right = width - gap - left;
+            if mode == 1 {
+                (left + gap, top, right, h, 0, top, left, h)
+            } else {
+                (0, top, left, h, left + gap, top, right, h)
+            }
+        };
+        set_text(
+            self.editor_label,
+            &format!("  EDITOR — {}", self.documents[self.active].doc.title),
+        );
+        MoveWindow(self.editor_label, ex, ey, ew, header.min(eh), 1);
+        MoveWindow(self.hex_label, hx, hy, hw, header.min(hh), 1);
+        MoveWindow(
+            self.edit(),
+            ex,
+            ey + header.min(eh),
+            ew,
+            (eh - header).max(0),
+            1,
+        );
+        MoveWindow(
+            self.hex,
+            hx,
+            hy + header.min(hh),
+            hw,
+            (hh - header).max(0),
+            1,
+        );
+        ShowWindow(self.hex, SW_SHOW);
+        self.refresh_hex();
     }
     unsafe fn apply_font(&mut self, i: usize) {
         let t = &mut self.documents[i];
@@ -1171,6 +1248,7 @@ impl App {
         SendMessageW(t.edit, 0x444, 4, &cf as *const _ as isize);
         SendMessageW(t.edit, 0x444, 0, &cf as *const _ as isize);
         SendMessageW(t.edit, 0x4e1, t.doc.zoom as usize, 100);
+        recolor_raw(t.edit);
         InvalidateRect(t.edit, null(), 1);
     }
     unsafe fn set_wrap(&self, i: usize) {
@@ -1181,9 +1259,15 @@ impl App {
         title_theme(self.hwnd);
         self.menus.theme();
         let p = palette();
-        for hwnd in [self.tabs, self.status, self.results]
-            .into_iter()
-            .chain(self.search_controls.iter().copied())
+        for hwnd in [
+            self.tabs,
+            self.status,
+            self.results,
+            self.hex_label,
+            self.editor_label,
+        ]
+        .into_iter()
+        .chain(self.search_controls.iter().copied())
         {
             SendMessageW(hwnd, WM_SETFONT, ui_font() as usize, 1);
         }
@@ -1412,9 +1496,13 @@ impl App {
         SendMessageW(self.query, EM_SETSEL, 0, -1);
     }
     unsafe fn invalidate_results(&mut self) {
+        let had_results = !self.hits.is_empty();
         self.hits.clear();
         self.hit_index = 0;
         SendMessageW(self.results, LB_RESETCONTENT, 0, 0);
+        if had_results && !self.documents.is_empty() {
+            self.layout();
+        }
     }
     unsafe fn search_all(&mut self) {
         for i in 0..self.documents.len() {
@@ -1604,26 +1692,37 @@ impl App {
         if d.hex == 0 {
             return;
         }
+        let mut rect: RECT = zeroed();
+        GetClientRect(self.hex, &mut rect);
+        let dc = GetDC(self.hex);
+        let old = SelectObject(dc, self.hex_font);
+        let mut metrics: TEXTMETRICW = zeroed();
+        GetTextMetricsW(dc, &mut metrics);
+        SelectObject(dc, old);
+        ReleaseDC(self.hex, dc);
+        let columns = if rect.right / metrics.tmAveCharWidth.max(1) >= 78 {
+            16
+        } else if rect.right / metrics.tmAveCharWidth.max(1) >= 46 {
+            8
+        } else {
+            4
+        };
         let bytes = d.bytes();
-        let mut out =
-            "Offset    | Hex bytes                                       | ASCII\r\n".to_string();
-        for (i, chunk) in bytes
-            .iter()
-            .take(65536)
-            .copied()
-            .collect::<Vec<_>>()
-            .chunks(16)
-            .enumerate()
-        {
-            out.push_str(&format!("{:08X}  ", i * 16));
-            for n in 0..16 {
+        let mut out = format!(
+            "Offset    | {:width$}| ASCII\r\n",
+            "Hex bytes",
+            width = columns * 3
+        );
+        for (i, chunk) in bytes[..bytes.len().min(65536)].chunks(columns).enumerate() {
+            out.push_str(&format!("{:08X}  | ", i * columns));
+            for n in 0..columns {
                 if let Some(b) = chunk.get(n) {
                     out.push_str(&format!("{b:02X} "));
                 } else {
                     out.push_str("   ");
                 }
             }
-            out.push_str(" | ");
+            out.push_str("| ");
             for b in chunk {
                 out.push(if (32..127).contains(b) {
                     *b as char
@@ -1636,9 +1735,25 @@ impl App {
         if bytes.len() > 65536 {
             out.push_str("Preview limited to 64 KiB.");
         }
+        if *self.hex_rendered.borrow() == out {
+            return;
+        }
+        let selected = range(self.hex);
+        let mut scroll: POINT = zeroed();
+        SendMessageW(self.hex, 0x4dd, 0, &mut scroll as *mut _ as isize);
         set_raw(self.hex, &out);
-        let f = self.documents[self.active].font;
-        SendMessageW(self.hex, WM_SETFONT, f as usize, 1);
+        SendMessageW(self.hex, 0x443, 0, palette().control as isize);
+        recolor_raw(self.hex);
+        let end = out.encode_utf16().count() as i32;
+        set_range(
+            self.hex,
+            Range {
+                start: selected.start.min(end),
+                end: selected.end.min(end),
+            },
+        );
+        SendMessageW(self.hex, 0x4de, 0, &scroll as *const _ as isize);
+        *self.hex_rendered.borrow_mut() = out;
     }
     unsafe fn checksum(&mut self) {
         self.capture(self.active);
@@ -1944,7 +2059,7 @@ impl App {
                 }
             }
             ABOUT => {
-                prompt(self.hwnd,"About ByteForge Rust","ByteForge Rust 1.1.1\nNative Win32 / RichEdit — Rust edition\nForked from ByteForge 1.0.0.10 (a401721).\n\nTabs, independent formatting, cross-tab search and crash recovery.\nRecovery stores readable text in your local profile.\n\nBugs / security: jaapengel79@proton.me",None,&["OK"]);
+                prompt(self.hwnd,"About ByteForge Rust","ByteForge Rust 1.1.2\nNative Win32 / RichEdit — Rust edition\nForked from ByteForge 1.0.0.10 (a401721).\n\nTabs, independent formatting, cross-tab search and crash recovery.\nRecovery stores readable text in your local profile.\n\nBugs / security: jaapengel79@proton.me",None,&["OK"]);
             }
             423 | 424 => self.invalidate_results(),
             _ => {}

@@ -74,16 +74,16 @@ fn version_block(
 fn version_resource() -> Vec<u8> {
     let mut fixed = vec![];
     for n in [
-        0xFEEF04BD, 0x00010000, 0x00010001, 0x00010000, 0x00010001, 0x00010000, 0x3F, 0,
+        0xFEEF04BD, 0x00010000, 0x00010001, 0x00020000, 0x00010001, 0x00020000, 0x3F, 0,
         0x00040004, 1, 0, 0, 0,
     ] {
         u32le(&mut fixed, n);
     }
     let fields = [
         ("FileDescription", "ByteForge Rust native tabbed editor"),
-        ("FileVersion", "1.1.1.0"),
+        ("FileVersion", "1.1.2.0"),
         ("ProductName", "ByteForge Rust"),
-        ("ProductVersion", "1.1.1.0"),
+        ("ProductVersion", "1.1.2.0"),
         ("OriginalFilename", "ByteForge-Rust.exe"),
         ("InternalName", "ByteForge-Rust"),
         ("LegalCopyright", "Copyright 2026 Jaap"),
@@ -161,7 +161,7 @@ fn main() {
     fs::write(out.join("app.ico"), ico).unwrap();
     let manifest=br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-<assemblyIdentity version="1.1.1.0" processorArchitecture="amd64" name="ByteForge.Rust" type="win32"/>
+<assemblyIdentity version="1.1.2.0" processorArchitecture="amd64" name="ByteForge.Rust" type="win32"/>
 <description>ByteForge Rust</description>
 <dependency><dependentAssembly><assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/></dependentAssembly></dependency>
 <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3"><security><requestedPrivileges><requestedExecutionLevel level="asInvoker" uiAccess="false"/></requestedPrivileges></security></trustInfo>

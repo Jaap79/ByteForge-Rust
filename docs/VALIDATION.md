@@ -1,6 +1,17 @@
-# Validation — ByteForge Rust 1.1.1
+# Validation — ByteForge Rust 1.1.2
 
-## Current patch build
+## Current 1.1.2 build — 30 October 2026
+
+- Path: `dist/ByteForge-Rust.exe`; size: 471,040 bytes; Windows FileVersion/ProductVersion: `1.1.2.0`.
+- SHA-256: `42E8EB0844AD5DA6FDAF2C9B4353624AED539065FFE37C29BA96A6D1DA0C4CE3`.
+- Format check, seven model/storage tests, Clippy with warnings denied and optimized release build all passed.
+- **74 native UI integration checks** passed, including live hex updates and undo, actual 9pt Consolas character formatting, foreground colors after three font choices in both themes, readable highlighted text, empty-result collapse and non-overlapping labeled panes in all three positions.
+- **Nine process-stop/restart checks** passed with unchanged logical highlight colors and recovery metadata.
+- Local evidence: `output/qa-20261030-090958-580/checks.txt`, `result.txt`, `restart/result.txt`.
+- Computer Use verified real typing while the hex pane stayed open: typing ` XYZ` immediately added bytes `20 58 59 5A` to the preview. Switching the editor to Georgia retained light text in dark mode while hex stayed monospace. Light mode showed dark text in both panes. Left and below layouts were inspected with visible headers/divider and aligned ASCII columns; remaining layout paths are covered by native geometry checks.
+- The Jaap design-language palette is retained. Dark-mode highlight backgrounds are deeper so the foreground remains consistently light; session metadata continues storing the original logical color.
+
+## Previous 1.1.1 build
 
 - New editors immediately receive the current theme background and foreground after font initialization. Covers New, Open and recovery creation.
 - Tab color stripes are 8 logical pixels on the active tab and 6 on inactive tabs; both render paths share the same sizing rule and DPI scaling.

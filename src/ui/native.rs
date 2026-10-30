@@ -722,17 +722,42 @@ pub unsafe fn format(hwnd: HWND, color: Option<u32>) {
     let mut cf: CharFormat = zeroed();
     cf.size = size_of::<CharFormat>() as u32;
     cf.mask = 0x04000000 | 0x40000000;
-    cf.color = if color.is_some() {
-        rgb(0x17202a)
-    } else {
-        palette().text
-    };
+    cf.color = palette().text;
     if let Some(c) = color {
-        cf.back = c;
+        cf.back = themed_highlight(c);
     } else {
         cf.effects = 0x04000000;
     }
     SendMessageW(hwnd, 0x444, 1, &cf as *const _ as isize);
+}
+// Session metadata keeps the original logical colors. Dark mode uses deeper
+// backgrounds so highlighted text can retain the same light foreground.
+const HIGHLIGHT_PAIRS: [(u32, u32); 4] = [
+    (0xFFA0A0, 0x68343B),
+    (0xFFC800, 0x654719),
+    (0xFFFF00, 0x57521C),
+    (0x80FF80, 0x28583D),
+];
+pub fn logical_highlight(color: u32) -> u32 {
+    let color = rgb(color);
+    HIGHLIGHT_PAIRS
+        .iter()
+        .find(|(light, dark)| *light == color || *dark == color)
+        .map(|p| p.0)
+        .unwrap_or(color)
+}
+fn themed_highlight(color: u32) -> u32 {
+    let logical = logical_highlight(color);
+    let displayed = if DARK.get() {
+        HIGHLIGHT_PAIRS
+            .iter()
+            .find(|p| p.0 == logical)
+            .map(|p| p.1)
+            .unwrap_or(logical)
+    } else {
+        logical
+    };
+    rgb(displayed)
 }
 /// Recolor only uniform background runs, retaining readable text on existing highlights.
 pub unsafe fn recolor_raw(hwnd: HWND) {
@@ -763,11 +788,11 @@ pub unsafe fn recolor_raw(hwnd: HWND) {
             let automatic = cf.effects & 0x04000000 != 0;
             cf.mask = 0x40000000;
             cf.effects = 0;
-            cf.color = if automatic {
-                palette().text
-            } else {
-                rgb(0x17202a)
-            };
+            cf.color = palette().text;
+            if !automatic {
+                cf.mask |= 0x04000000;
+                cf.back = themed_highlight(cf.back);
+            }
             SendMessageW(hwnd, 0x444, 1, &cf as *const _ as isize);
         }
     }

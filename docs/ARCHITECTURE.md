@@ -22,6 +22,10 @@ An exclusive file handle with share mode 0 prevents two processes from writing o
 
 ## Interface
 
+The hex viewer owns a separate 9pt Consolas HFONT rather than borrowing a tab's editor font handle. EN_CHANGE coalesces a deferred REFRESH_HEX message so text is captured after native editing completes; capture also refreshes after programmatic changes such as undo and replace. Cached preview text avoids resetting selection/scroll when encoded bytes have not changed. Pane width and monospace metrics select 4/8/16 bytes per row. Editor/hex headers and an 8px scaled divider separate the panes, and empty search results do not reserve an unused panel.
+
+Font application explicitly reapplies theme foreground after WM_SETFONT/CHARFORMAT changes. Dark-mode highlights use deeper rendered backgrounds paired with their unchanged logical session color; capture normalizes both theme variants back to that logical color. This keeps all editor text light in dark mode and dark in light mode without changing the recovery file schema.
+
 The shared Jaap palette has semantic roles for dark/light surfaces, text, borders and accent. Native title bars are themed via DWM. Menus are owner-drawn while retaining labels/access keys. The native TabControl keeps its accessibility and hit testing; a subclass paints its full surface and per-tab color stripe. Checkbox painting preserves native toggle/keyboard semantics. DPI changes rebuild fonts and control sizes. Each theme change redraws the full child tree.
 
 WM_SETREDRAW restores WS_VISIBLE; highlight snapshotting and theme helpers explicitly preserve prior visibility so hidden editors stay hidden. This has a native UI regression check.
