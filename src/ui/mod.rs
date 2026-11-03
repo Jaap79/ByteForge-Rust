@@ -35,6 +35,9 @@ const CUT: u16 = 212;
 const COPY: u16 = 213;
 const PASTE: u16 = 214;
 const SELECT_ALL: u16 = 215;
+const PASTE_PLAIN: u16 = 216;
+const PASTE_LABEL: &str = "Plakken &met opmaak\tCtrl+V";
+const PASTE_PLAIN_LABEL: &str = "Plakken &zonder opmaak\tCtrl+Shift+V";
 const FIND: u16 = 220;
 const FIND_ALL: u16 = 221;
 const FIND_NEXT: u16 = 222;
@@ -167,6 +170,7 @@ pub fn run() {
         let qa = option("--ui-self-test")
             .or_else(|| option("--verify-recovery"))
             .or_else(|| option("--verify-explorer"));
+        let qa = qa.or_else(|| option("--profile-syntax"));
         let dir = option("--session-dir").unwrap_or_else(|| {
             qa.as_ref()
                 .map(|p| p.join("session"))
@@ -233,7 +237,7 @@ pub fn run() {
         let hwnd = CreateWindowExW(
             WS_EX_ACCEPTFILES,
             class.as_ptr(),
-            wide("ByteForge Rust 1.2.1").as_ptr(),
+            wide("ByteForge Rust 1.2.2").as_ptr(),
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -1250,9 +1254,11 @@ impl App {
     }
     unsafe fn paint_syntax(&self, force: bool) {
         if let Some(t) = self.documents.get(self.active) {
-            t.syntax
-                .borrow_mut()
-                .paint(t.edit, &t.doc.text, t.doc.context, force);
+            let mut display = t.syntax.borrow_mut();
+            display.paint(t.edit, &t.doc.text, t.doc.context, force);
+            if display.pending() {
+                PostMessageW(self.hwnd, SYNTAX_VIEW, t.edit as usize, 0);
+            }
         }
     }
     unsafe fn move_tab(&mut self, from: usize, to: usize) {
@@ -1433,7 +1439,7 @@ impl App {
                 self.update = None;
                 match result {
                     Ok(v) => {
-                        prompt(self.hwnd,"Upstream version",&format!("Rust edition: 1.2.1\nFASM upstream: {v}\n\nThis is the original FASM feed, not an update channel for this Rust edition.\nhttps://github.com/Jaap79/ByteForge"),None,&["OK"]);
+                        prompt(self.hwnd,"Upstream version",&format!("Rust edition: 1.2.2\nFASM upstream: {v}\n\nThis is the original FASM feed, not an update channel for this Rust edition.\nhttps://github.com/Jaap79/ByteForge"),None,&["OK"]);
                     }
                     Err(e) => error(self.hwnd, &e),
                 }
@@ -1451,7 +1457,7 @@ impl App {
         set_text(
             self.hwnd,
             &format!(
-                "{}{} — ByteForge Rust 1.2.1",
+                "{}{} — ByteForge Rust 1.2.2",
                 if tab.doc.dirty { "* " } else { "" },
                 path
             ),
@@ -2313,6 +2319,12 @@ impl App {
                     self.documents[self.active].changed = true;
                 }
             }
+            PASTE_PLAIN => {
+                let tab = &self.documents[self.active];
+                if paste_plain(tab.edit, &tab.doc.font, tab.doc.points) {
+                    self.documents[self.active].changed = true;
+                }
+            }
             FIND | REPLACE => self.show_search(false),
             FIND_ALL => self.show_search(true),
             FIND_MORE => {
@@ -2524,7 +2536,7 @@ impl App {
                 }
             }
             ABOUT => {
-                prompt(self.hwnd,"About ByteForge Rust","ByteForge Rust 1.2.1\nNative Win32 / RichEdit — Rust edition\nForked from ByteForge 1.0.0.10 (a401721).\n\nDraggable tabs, per-tab syntax contexts, cross-tab search and recovery.\nRecovery stores readable text in your local profile.\n\nBugs / security: jaapengel79@proton.me",None,&["OK"]);
+                prompt(self.hwnd,"About ByteForge Rust","ByteForge Rust 1.2.2\nNative Win32 / RichEdit — Rust edition\nForked from ByteForge 1.0.0.10 (a401721).\n\nDraggable tabs, per-tab syntax contexts, cross-tab search and recovery.\nRecovery stores readable text in your local profile.\n\nBugs / security: jaapengel79@proton.me",None,&["OK"]);
             }
             423 | 424 => self.invalidate_results(),
             _ => {}
@@ -2550,6 +2562,18 @@ impl App {
             );
         }
         let r = range(self.edit());
+        for (id, plain) in [(PASTE, false), (PASTE_PLAIN, true)] {
+            EnableMenuItem(
+                self.menus.root,
+                id as u32,
+                MF_BYCOMMAND
+                    | if can_paste(self.edit(), plain) {
+                        MF_ENABLED
+                    } else {
+                        MF_GRAYED
+                    },
+            );
+        }
         for id in [
             CUT, COPY, FIND_MORE, CLEAR, HL_RED, HL_ORANGE, HL_YELLOW, HL_GREEN,
         ] {
@@ -2604,7 +2628,7 @@ impl App {
     }
     unsafe fn context_menu(&mut self, lp: isize) {
         let selected = range(self.edit());
-        let (m, pop) = editor_menu(selected.start != selected.end);
+        let (m, pop) = editor_menu(selected.start != selected.end, self.edit());
         m.theme();
         let mut p = POINT {
             x: (lp as i16) as i32,
@@ -2651,17 +2675,20 @@ unsafe fn tab_menu(color: u8) -> (Menus, HMENU) {
     m.add(pop, CLOSE as usize, "Tabblad sluiten\tCtrl+W", false);
     (m, pop)
 }
-unsafe fn editor_menu(selected: bool) -> (Menus, HMENU) {
+unsafe fn editor_menu(selected: bool, edit: HWND) -> (Menus, HMENU) {
     let mut m = Menus::new();
     let pop = m.popup();
     for (id, label) in [
         (CUT, "Cut\tCtrl+X"),
         (COPY, "Copy\tCtrl+C"),
-        (PASTE, "Paste\tCtrl+V"),
+        (PASTE, PASTE_LABEL),
+        (PASTE_PLAIN, PASTE_PLAIN_LABEL),
         (FIND_MORE, "Find selection in all tabs"),
     ] {
         m.add(pop, id as usize, label, false);
-        if !selected && id != PASTE {
+        if (matches!(id, PASTE | PASTE_PLAIN) && !can_paste(edit, id == PASTE_PLAIN))
+            || (!selected && !matches!(id, PASTE | PASTE_PLAIN))
+        {
             EnableMenuItem(pop, id as u32, MF_BYCOMMAND | MF_GRAYED);
         }
     }
@@ -2706,7 +2733,8 @@ unsafe fn make_menus() -> Menus {
                 (0, ""),
                 (CUT, "Cu&t\tCtrl+X"),
                 (COPY, "&Copy\tCtrl+C"),
-                (PASTE, "&Paste\tCtrl+V"),
+                (PASTE, PASTE_LABEL),
+                (PASTE_PLAIN, PASTE_PLAIN_LABEL),
                 (SELECT_ALL, "Select &all\tCtrl+A"),
                 (0, ""),
                 (FIND, "&Find in tab…\tCtrl+F"),
@@ -2843,6 +2871,7 @@ fn accelerators() -> Vec<ACCEL> {
         (ctrl, b'X' as u16, CUT),
         (ctrl, b'C' as u16, COPY),
         (ctrl, b'V' as u16, PASTE),
+        (shift, b'V' as u16, PASTE_PLAIN),
         (ctrl, b'A' as u16, SELECT_ALL),
         (ctrl, b'F' as u16, FIND),
         (shift, b'F' as u16, FIND_ALL),

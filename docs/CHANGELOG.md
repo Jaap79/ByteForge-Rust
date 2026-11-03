@@ -1,5 +1,12 @@
 # Changelog
 
+## Rust edition 1.2.2
+
+- Add **Plakken met opmaak** (Ctrl+V) and **Plakken zonder opmaak** (Ctrl+Shift+V) to Edit and the editor context menu. Plain paste uses Unicode text and the current tab font/theme, strips source and inherited character styling/marks, and groups insertion/normalization into one undo action.
+- Fix severe syntax-coloring delays on long JSON/NDJSON lines: clip each visible row horizontally instead of formatting all intervening offscreen text, use selection-free TOM ranges, and process bounded batches between UI messages.
+- Avoid quadratic JSON property-span removal on minified lines and binary-search token spans within cached lines. Preserve scroll, selection, manual marks and undo/redo during decoration.
+- Add native multiline/Unicode/rich/plain-paste regression tests in both themes, plus real-rendering performance/visible-row tests for large long-row and minified JSON files. No runtime, grammar file or dependency is added.
+
 ## Rust edition 1.2.1
 
 - Hand off Explorer/Open With and command-line file launches to the current workspace's existing window instead of showing the session-lock warning.

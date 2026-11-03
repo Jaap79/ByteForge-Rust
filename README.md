@@ -1,10 +1,10 @@
-# ByteForge Rust 1.2.1
+# ByteForge Rust 1.2.2
 
 Native Windows text editor with colored tabs, independent tab settings, cross-tab search and session recovery. This is a separate Rust edition forked from ByteForge 1.0.0.10 at `a401721`; the original FASM repository is unchanged. Original source and binary are retained in `legacy/` and the Git history is preserved.
 
 Repository: [Jaap79/ByteForge-Rust](https://github.com/Jaap79/ByteForge-Rust). The current executable is included under `dist/`; this preview does not yet have a separate GitHub Release or automatic Rust update feed.
 
-Run **`dist/ByteForge-Rust.exe`** (1.2.1). Close any old instance once when upgrading so the executable can be replaced. One self-contained executable; only standard Windows DLLs are needed. No browser, WebView, .NET, PowerShell installation, sidecar grammar files or installed Rust runtime is required.
+Run **`dist/ByteForge-Rust.exe`** (1.2.2). Close any old instance once when upgrading so the executable can be replaced. One self-contained executable; only standard Windows DLLs are needed. No browser, WebView, .NET, PowerShell installation, sidecar grammar files or installed Rust runtime is required.
 
 ## Tabs and editing
 
@@ -18,6 +18,8 @@ UTF-8, UTF-8 BOM, UTF-16LE BOM and UTF-16BE BOM are supported. Encoding and CRLF
 
 Text follows the active theme after font changes: light in dark mode, dark in light mode. Highlight backgrounds have deeper shades in dark mode so light letters remain readable; the original logical highlight colors are retained in session storage.
 
+**Edit** and the editor's right-click menu offer **Plakken met opmaak** (Ctrl+V) and **Plakken zonder opmaak** (Ctrl+Shift+V). The first keeps available rich-text formatting. The second inserts only Unicode text, using the current tab's font/size and theme, without source or inherited character styles/highlights. Each paste is one undo/redo action. These remain plain-text documents: rich formatting is for the live editor, not RTF/HTML file saving; recovery retains the existing per-tab settings and manual highlight ranges, not arbitrary rich-text styles.
+
 ## Syntax context — per tab
 
 Choose **Tools → Context (this tab)**: **Plain text**, **PowerShell**, **JSON**, **YAML**, **XML / HTML** or **INI / config**. New tabs start as Plain text; context is chosen explicitly, stays independent per tab and is restored with the session. Ctrl+Alt+Shift+0–5 selects the corresponding context.
@@ -26,7 +28,7 @@ PowerShell distinguishes keywords, function/command names, parameters, variables
 
 Separate syntax palettes provide at least 4.5:1 contrast on the dark/light editor backgrounds. Manual text-highlight backgrounds take priority, using the theme's default foreground so marks stay readable. Returning to Plain text removes syntax foregrounds, not manual marks or fonts. Syntax changes do not change file contents, dirty state, caret/selection, scrolling or undo/redo history.
 
-Typing is debounced by 120 ms. A line-state cache reuses unchanged syntax until multiline state converges; native foreground formatting is limited to the visible viewport and refreshed on scroll. No extra dependency is added.
+Typing is debounced by 120 ms. A line-state cache reuses unchanged syntax until multiline state converges. Native foreground formatting clips each visible screen row horizontally, so long offscreen JSON/NDJSON tails are not formatted. Selection-free TOM ranges apply changes in batches of at most 256 operations or roughly 8 ms, yielding through the message loop between batches. Scroll refreshes reuse cached tokens. No extra dependency is added.
 
 ## Search
 
@@ -58,6 +60,7 @@ All menu actions show their shortcuts. Important mappings:
 | New / Open / Save | Ctrl+N / Ctrl+O / Ctrl+S |
 | Save as / Save all | Ctrl+Shift+S / Ctrl+Alt+S |
 | Close tab / Exit | Ctrl+W / Alt+F4 |
+| Paste with / without formatting | Ctrl+V / Ctrl+Shift+V |
 | Next / Previous tab | Ctrl+Tab / Ctrl+Shift+Tab |
 | Move tab left / right | Ctrl+Alt+Left / Right |
 | Tab color (default/red/orange/yellow/green/blue/purple) | Ctrl+Alt+0–6 |
@@ -80,19 +83,20 @@ Ctrl+W now closes a tab; word wrap moved to Alt+Z. The manual upstream check exp
 
 ## Build and verify
 
-Rust Windows GNU toolchain; one pinned dependency, `windows-sys = 0.59.0`. `build.rs` embeds the geometric ByteForge-family icon, DPI manifest and Windows version resource without a resource compiler. Version: 1.2.1 / PE 1.2.1.0.
+Rust Windows GNU toolchain; one pinned dependency, `windows-sys = 0.59.0`. `build.rs` embeds the geometric ByteForge-family icon, DPI manifest and Windows version resource without a resource compiler. Version: 1.2.2 / PE 1.2.2.0.
 
 ```powershell
 .\scripts\build.ps1 -Test -Clippy
 .\tests\ui-smoke.ps1
 .\tests\explorer-open.ps1
+.\tests\syntax-performance.ps1
 ```
 
 For a side-by-side build while the default executable is running:
 
 ```powershell
-.\scripts\build.ps1 -Test -Clippy -Output dist\ByteForge-Rust-1.2.0.exe
-.\tests\ui-smoke.ps1 -Executable .\dist\ByteForge-Rust-1.2.0.exe
+.\scripts\build.ps1 -Test -Clippy -Output dist\ByteForge-Rust-1.2.2.exe
+.\tests\ui-smoke.ps1 -Executable .\dist\ByteForge-Rust-1.2.2.exe
 ```
 
 The build helper reuses the existing sibling `CSVcoder-Rust\.tooling` installation if present, or accepts `-ToolingRoot`; otherwise it uses Cargo on PATH. It changes only the current process environment. Dependencies must already be cached for its offline build; on a fresh toolchain run `cargo fetch --locked` once. With a normal configured toolchain, `cargo test --locked` and `cargo build --release --locked` work directly.

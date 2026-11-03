@@ -1,6 +1,18 @@
-# Validation — ByteForge Rust 1.2.1
+# Validation — ByteForge Rust 1.2.2
 
-## Current 1.2.1 build — 30 October 2026
+## Current 1.2.2 build — 3 November 2026
+
+- Path: `dist/ByteForge-Rust.exe`; size: 577,536 bytes (564 KiB); Windows FileVersion/ProductVersion: `1.2.2.0`.
+- SHA-256: `27355108D38DCFC11EE687661CAFB66E0F26A1D4A40E7B06C094EC6D151F6776`.
+- Format check, **18 unit/model/storage tests**, Clippy with warnings denied and optimized release build passed.
+- **147 native UI integration checks** and **10 process-stop/restart checks** passed. This includes real rich/plain clipboard insertion in both themes, source font/size/effects/marks, destination font/theme normalization, multiline Unicode/emoji, replacement boundaries, caret, neighboring formatting, single-step Undo/Redo, empty clipboard/menu disabling, and actual Win32 accelerator dispatch. Clipboard test fixtures duplicate/restore existing formats and refuse unsupported formats before changing the clipboard. Evidence: `output/qa-20261103-084535-568/`.
+- `tests/syntax-performance.ps1` passed large long-row NDJSON (562,449 bytes, **155 native checks**) and single-line minified JSON (577,781 bytes, **47 native checks**). Initial visible coloring completed in about **30 ms / 66 ms**, respectively, in this controlled run, with formatting batches below 2 ms. It also verifies token foregrounds on visible rows after vertical/horizontal scrolling and theme changes, plus unchanged text, selection and scroll. Evidence: `output/syntax-20261103-084537-544/`.
+- The reported local input (420,849 bytes, 284 long records) was opened **read-only**, without copying its contents into repository fixtures or logs. Initial visible coloring completed in **41 ms**, in three batches with maximum formatting time **1.1 ms**; **155 native checks** passed. Evidence contains aggregate timing/offset counts only: `output/syntax-20261103-084538-432/`. Earlier instrumented baseline: JSON analysis 2.2 ms, native formatting 9.9 seconds for 5,515 spans, including invisible row tails (`output/profile-json-baseline/timings.txt`). User-reported 40 seconds is not claimed as the controlled baseline. The old lexer-only benchmark did not catch this native formatting regression.
+- Explorer-style real multi-process regression passed, including **147 baseline**, **five primary-workspace** and **three isolated-workspace** checks: `output/explorer-20261103-084538-858/`.
+- After the user closed the old version, the canonical executable was replaced with the byte-identical tested build; the former executable remains as an ignored local `dist/ByteForge-Rust-1.2.1-backup.exe`. User recovery files, source documents and associations were not changed. There is still one self-contained distribution executable and no added Cargo dependency.
+- Computer Use inspected the canonical 1.2.2 executable in a separate empty workspace: both paste labels and shortcut columns are complete in Edit and the editor right-click menu; dark/light title bars, menu chrome and readable item states retain the design-language palette. No monitor scaling changes were made; 125%/150% were not separately tested. The test workspace does not open or alter the user's recovery session.
+
+## Previous 1.2.1 build — 30 October 2026
 
 - Path: `dist/ByteForge-Rust.exe`; size: 553,984 bytes (541 KiB); Windows FileVersion/ProductVersion: `1.2.1.0`.
 - SHA-256: `2FBBF71ECAEB1EF605669DA0685515AD23AAEF3E52F935FC4116FA2BBFD4172F`.

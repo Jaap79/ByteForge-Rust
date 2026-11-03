@@ -1,6 +1,117 @@
 use super::*;
 thread_local! {pub static OUTPUT:RefCell<Option<PathBuf>>=const{RefCell::new(None)};}
 thread_local! {static RECEIVED:std::cell::Cell<u16>=const{std::cell::Cell::new(0)};}
+#[link(name = "ole32")]
+extern "system" {
+    fn OleInitialize(reserved: *mut std::ffi::c_void) -> i32;
+    fn OleUninitialize();
+    fn OleDuplicateData(data: HANDLE, format: u16, flags: u32) -> HANDLE;
+}
+/// Materialize and duplicate all formats before changing the real clipboard.
+/// Never overwrite a new clipboard value copied by the operator meanwhile.
+struct ClipboardFixture {
+    saved: Vec<(u32, HANDLE)>,
+    owner: HWND,
+    sequence: u32,
+}
+impl ClipboardFixture {
+    unsafe fn new(owner: HWND) -> Result<Self, String> {
+        use windows_sys::Win32::System::DataExchange::*;
+        if OleInitialize(null_mut()) < 0 {
+            return Err("Cannot initialize clipboard QA".into());
+        }
+        let mut fixture = Self {
+            saved: vec![],
+            owner,
+            sequence: 0,
+        };
+        if OpenClipboard(owner) == 0 {
+            return Err("Cannot preserve the current clipboard".into());
+        }
+        let result: Result<(), String> = (|| {
+            let mut format = EnumClipboardFormats(0);
+            while format != 0 {
+                // Owner-display and legacy metafile handles need special lifetime
+                // handling; fail before altering anything instead of losing them.
+                if matches!(format, 3 | 0x80 | 0x83)
+                    || format > u16::MAX as u32
+                    || fixture.saved.len() >= 256
+                {
+                    return Err("Clipboard QA cannot safely preserve this clipboard format".into());
+                }
+                let data = GetClipboardData(format);
+                let copy = if data.is_null() {
+                    null_mut()
+                } else {
+                    OleDuplicateData(data, format as u16, 0)
+                };
+                if copy.is_null() {
+                    return Err("Cannot duplicate a clipboard format for safe QA".into());
+                }
+                fixture.saved.push((format, copy));
+                format = EnumClipboardFormats(format);
+            }
+            Ok(())
+        })();
+        CloseClipboard();
+        result?;
+        Ok(fixture)
+    }
+    unsafe fn own(&mut self) {
+        self.sequence = windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber();
+    }
+}
+impl Drop for ClipboardFixture {
+    fn drop(&mut self) {
+        unsafe {
+            use windows_sys::Win32::System::DataExchange::*;
+            if self.sequence != 0
+                && self.sequence == GetClipboardSequenceNumber()
+                && OpenClipboard(self.owner) != 0
+            {
+                if EmptyClipboard() != 0 {
+                    for (format, data) in &mut self.saved {
+                        if !SetClipboardData(*format, *data).is_null() {
+                            *data = null_mut();
+                        }
+                    }
+                }
+                CloseClipboard();
+            }
+            for (format, data) in self.saved.drain(..).filter(|(_, h)| !h.is_null()) {
+                match format {
+                    2 | 9 | 0x82 => {
+                        DeleteObject(data);
+                    }
+                    14 | 0x8e => {
+                        DeleteEnhMetaFile(data);
+                    }
+                    _ => {
+                        GlobalFree(data);
+                    }
+                }
+            }
+            OleUninitialize();
+        }
+    }
+}
+unsafe fn character_format(hwnd: HWND, selected: Range) -> CharFormat {
+    let original = range(hwnd);
+    set_range(hwnd, selected);
+    let mut cf: CharFormat = zeroed();
+    cf.size = size_of::<CharFormat>() as u32;
+    SendMessageW(hwnd, 0x43a, 1, &mut cf as *mut _ as isize);
+    set_range(hwnd, original);
+    cf
+}
+fn face(cf: &CharFormat) -> String {
+    let end = cf
+        .face
+        .iter()
+        .position(|c| *c == 0)
+        .unwrap_or(cf.face.len());
+    String::from_utf16_lossy(&cf.face[..end])
+}
 unsafe fn foreground(hwnd: HWND, r: Range) -> u32 {
     let original = range(hwnd);
     set_range(hwnd, r);
@@ -118,7 +229,9 @@ pub unsafe fn run(app: &mut App) {
     let output = OUTPUT.with(|o| o.borrow().clone()).unwrap();
     let _ = fs::create_dir_all(&output);
     let verify = std::env::args_os().any(|a| a == "--verify-recovery");
-    let result = if std::env::args_os().any(|a| a == "--verify-explorer") {
+    let result = if std::env::args_os().any(|a| a == "--profile-syntax") {
+        profile_syntax(app, &output)
+    } else if std::env::args_os().any(|a| a == "--verify-explorer") {
         verify_explorer(app, &output)
     } else if verify {
         verify_recovery(app)
@@ -133,6 +246,95 @@ pub unsafe fn run(app: &mut App) {
     if !std::env::args_os().any(|a| a == "--crash-fixture") {
         DestroyWindow(app.hwnd);
     }
+}
+unsafe fn profile_syntax(app: &mut App, output: &Path) -> Result<usize, String> {
+    let args: Vec<_> = std::env::args_os().collect();
+    let input = args
+        .iter()
+        .position(|a| a == "--profile-input")
+        .and_then(|i| args.get(i + 1))
+        .map(PathBuf::from)
+        .ok_or("Missing profile input")?;
+    let log = output.join("timings.txt");
+    fs::write(&log, "Opening input\n").map_err(|e| e.to_string())?;
+    let start = std::time::Instant::now();
+    app.open(&input);
+    fs::write(
+        &log,
+        format!("Open: {:?}\nApplying JSON context\n", start.elapsed()),
+    )
+    .map_err(|e| e.to_string())?;
+    app.command(CONTEXT_BASE + Context::Json as u16);
+    while app.documents[app.active].syntax.borrow().pending() {
+        app.paint_syntax(false);
+    }
+    {
+        let t = &app.documents[app.active];
+        let d = t.syntax.borrow();
+        let s = &d.stats;
+        fs::write(&log,format!("bytes={} lex_us={} format_us={} background_us={} total_us={} area={}..{} spans={} background_queries={} areas={} slices={} max_slice_us={} changes={}\n",t.doc.text.len(),s.lex_us,s.format_us,s.background_us,s.total_us,s.start,s.end,s.spans,s.background_queries,s.areas,s.slices,s.max_slice_us,s.changes)).map_err(|e|e.to_string())?;
+        if s.total_us > 1_000_000 || s.max_slice_us > 100_000 {
+            return Err("Syntax rendering exceeded its responsiveness regression budget".into());
+        }
+    }
+    let original = app.documents[app.active].doc.text.clone();
+    let edit = app.edit();
+    let selected = range(edit);
+    let mut checks = 2;
+    for action in 0..4 {
+        if action == 1 {
+            SendMessageW(edit, EM_LINESCROLL, 0, 100);
+        }
+        if action == 2 {
+            SendMessageW(edit, EM_LINESCROLL, 80, 0);
+        }
+        if action == 3 {
+            DARK.set(false);
+            brushes();
+            app.apply_theme();
+        }
+        let mut before: POINT = zeroed();
+        SendMessageW(edit, 0x4dd, 0, &mut before as *mut _ as isize);
+        app.paint_syntax(false);
+        while app.documents[app.active].syntax.borrow().pending() {
+            app.paint_syntax(false);
+        }
+        let mut after: POINT = zeroed();
+        SendMessageW(edit, 0x4dd, 0, &mut after as *mut _ as isize);
+        if before.x != after.x || before.y != after.y || range(edit) != selected {
+            return Err("Syntax rendering moved selection or scroll".into());
+        }
+        let areas = syntax::visible_areas(edit, original.encode_utf16().count() as i32);
+        let mut samples = 0;
+        for area in areas {
+            let display = app.documents[app.active].syntax.borrow();
+            let spans = display.cache.spans(area.start, area.end);
+            if let Some(token) = spans
+                .iter()
+                .find(|s| s.kind != byteforge_rust::syntax::Kind::Punctuation)
+            {
+                let r = Range {
+                    start: token.start.max(area.start),
+                    end: token.end.min(area.end),
+                };
+                if syntax::foreground_at(edit, r) != Some(rgb(token.kind.color(DARK.get()))) {
+                    return Err(format!(
+                        "Uncolored visible row at CP {} after action {action}",
+                        r.start
+                    ));
+                }
+                samples += 1;
+            }
+        }
+        if samples == 0 {
+            return Err("No visible token samples were verified".into());
+        }
+        checks += samples + 1;
+    }
+    if document::normalize(&raw_text(edit)) != original {
+        return Err("Syntax rendering changed document contents".into());
+    }
+    Ok(checks + 1)
 }
 unsafe fn verify_recovery(app: &mut App) -> Result<usize, String> {
     if app.documents.len() != 3 || app.active != 1 {
@@ -561,6 +763,7 @@ unsafe fn exercise(app: &mut App, output: &Path) -> Result<usize, String> {
         verify_accelerators(),
         "Every shortcut dispatches its actual Win32 accelerator command"
     );
+    checks.extend(exercise_paste(app)?);
     // Exercise editing in a disposable fourth tab, leaving the crash fixture unchanged.
     app.command(NEW);
     set_raw(app.edit(), "test text");
@@ -648,17 +851,17 @@ unsafe fn exercise(app: &mut App, output: &Path) -> Result<usize, String> {
     );
     DestroyMenu(pop);
     DestroyMenu(m.root);
-    let (m, pop) = editor_menu(true);
-    let mark = GetSubMenu(pop, 4);
+    let (m, pop) = editor_menu(true, app.edit());
+    let mark = GetSubMenu(pop, 5);
     check!(
-        GetMenuItemCount(pop) == 5 && !mark.is_null() && GetMenuItemCount(mark) == 5,
+        GetMenuItemCount(pop) == 6 && !mark.is_null() && GetMenuItemCount(mark) == 5,
         "Editor context menu groups all markings under one compact submenu"
     );
     DestroyMenu(pop);
     DestroyMenu(m.root);
-    let (m, pop) = editor_menu(false);
+    let (m, pop) = editor_menu(false, app.edit());
     check!(
-        GetMenuState(GetSubMenu(pop, 4), CLEAR as u32, MF_BYCOMMAND) & MF_GRAYED != 0,
+        GetMenuState(GetSubMenu(pop, 5), CLEAR as u32, MF_BYCOMMAND) & MF_GRAYED != 0,
         "Text markings are disabled without a selection"
     );
     DestroyMenu(pop);
@@ -958,4 +1161,151 @@ unsafe fn exercise(app: &mut App, output: &Path) -> Result<usize, String> {
     app.snapshot()?;
     let _ = fs::write(output.join("checks.txt"), checks.join("\n"));
     Ok(checks.len())
+}
+unsafe fn exercise_paste(app: &mut App) -> Result<Vec<String>, String> {
+    let mut checks = Vec::new();
+    macro_rules! check {
+        ($condition:expr, $label:expr) => {
+            if !$condition {
+                return Err($label.into());
+            }
+            checks.push($label.to_string());
+        };
+    }
+    let active = app.active;
+    let initial_count = app.documents.len();
+    let dark = DARK.get();
+    let mut clipboard = ClipboardFixture::new(app.hwnd)?;
+    app.command(NEW);
+    let source = app.edit();
+    let sample = "café 😀\nline two";
+    set_raw(source, sample);
+    app.documents[app.active].changed = true;
+    app.capture(app.active);
+    app.command(NEW);
+    let edit = app.edit();
+    for theme in [true, false] {
+        DARK.set(theme);
+        brushes();
+        app.apply_theme();
+        set_range(
+            source,
+            Range {
+                start: 0,
+                end: sample.encode_utf16().count() as i32,
+            },
+        );
+        let mut style: CharFormat = zeroed();
+        style.size = size_of::<CharFormat>() as u32;
+        style.mask = 0xa4000007; // face, size, background, bold/italic/underline
+        style.effects = 7;
+        style.height = 360;
+        style.back = themed_highlight(HIGHLIGHTS[0]);
+        for (a, b) in style.face.iter_mut().zip("Arial".encode_utf16()) {
+            *a = b;
+        }
+        SendMessageW(source, 0x444, 1, &style as *const _ as isize);
+        SendMessageW(source, WM_COPY, 0, 0);
+        clipboard.own();
+        check!(
+            can_paste(edit, false) && can_paste(edit, true),
+            "Both clipboard paste formats are available"
+        );
+        let (m, pop) = editor_menu(false, edit);
+        check!(
+            GetMenuState(pop, PASTE as u32, MF_BYCOMMAND) & MF_GRAYED == 0
+                && GetMenuState(pop, PASTE_PLAIN as u32, MF_BYCOMMAND) & MF_GRAYED == 0,
+            "Right-click offers both paste actions without a selection"
+        );
+        DestroyMenu(pop);
+        DestroyMenu(m.root);
+        for id in [PASTE, PASTE_PLAIN] {
+            set_raw(edit, "prefix|replace|suffix");
+            app.documents[app.active].changed = true;
+            let replaced = Range { start: 7, end: 14 };
+            set_range(edit, replaced);
+            // Deliberately put the target in a different marked style too.
+            format(edit, Some(HIGHLIGHTS[3]));
+            SendMessageW(edit, EM_EMPTYUNDOBUFFER, 0, 0);
+            app.command(id);
+            let end = range(edit);
+            check!(
+                document::normalize(&raw_text(edit)) == format!("prefix|{sample}|suffix"),
+                format!("Paste replaces only the selection and preserves multiline Unicode text (command {id}, actual {:?})", raw_text(edit))
+            );
+            check!(
+                end.start == end.end && end.end > replaced.start,
+                "Paste leaves the caret after the inserted text"
+            );
+            let cf = character_format(edit, Range { start: 7, end: 11 });
+            if id == PASTE {
+                check!(
+                    face(&cf) == "Arial"
+                        && cf.height == 360
+                        && cf.effects & 7 == 7
+                        && cf.back == style.back
+                        && cf.effects & 0x04000000 == 0,
+                    "Formatted paste retains source font, size, effects and marking"
+                );
+            } else {
+                let tab = &app.documents[app.active].doc;
+                check!(face(&cf) == tab.font && cf.height == tab.points * 20
+                    && cf.effects & 0x00037fff == 0 && cf.effects & 0x04000000 != 0
+                    && cf.color == palette().text,
+                    "Plain paste strips source and inherited marks/styles and uses the tab theme/font");
+            }
+            let prefix = character_format(edit, Range { start: 0, end: 6 });
+            check!(
+                prefix.effects & 0x04000000 != 0,
+                "Pasting does not change neighboring text formatting"
+            );
+            app.command(UNDO);
+            check!(
+                document::normalize(&raw_text(edit)) == "prefix|replace|suffix"
+                    && character_format(edit, replaced).back == themed_highlight(HIGHLIGHTS[3]),
+                "One undo reverses the whole paste and restores replaced text/marking"
+            );
+            app.command(REDO);
+            check!(
+                document::normalize(&raw_text(edit)) == format!("prefix|{sample}|suffix"),
+                "One redo reapplies the whole paste"
+            );
+        }
+    }
+    use windows_sys::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard};
+    if OpenClipboard(app.hwnd) == 0 {
+        return Err("Cannot clear the QA clipboard".into());
+    }
+    EmptyClipboard();
+    CloseClipboard();
+    clipboard.own();
+    let before = raw_text(edit);
+    app.command(PASTE_PLAIN);
+    check!(
+        raw_text(edit) == before,
+        "Plain paste with an empty clipboard leaves the document unchanged"
+    );
+    app.menu_state();
+    check!(
+        GetMenuState(app.menus.root, PASTE as u32, MF_BYCOMMAND) & MF_GRAYED != 0
+            && GetMenuState(app.menus.root, PASTE_PLAIN as u32, MF_BYCOMMAND) & MF_GRAYED != 0,
+        "Edit menu disables both paste actions for an empty clipboard"
+    );
+    let (m, pop) = editor_menu(false, edit);
+    check!(
+        GetMenuState(pop, PASTE as u32, MF_BYCOMMAND) & MF_GRAYED != 0
+            && GetMenuState(pop, PASTE_PLAIN as u32, MF_BYCOMMAND) & MF_GRAYED != 0,
+        "Right-click disables both paste actions for an empty clipboard"
+    );
+    DestroyMenu(pop);
+    DestroyMenu(m.root);
+    while app.documents.len() > initial_count {
+        app.documents[app.active].doc.dirty = false;
+        app.close_tab();
+    }
+    app.activate(active);
+    DARK.set(dark);
+    brushes();
+    app.apply_theme();
+    Ok(checks)
 }

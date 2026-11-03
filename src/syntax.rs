@@ -218,11 +218,15 @@ impl Cache {
             .iter()
             .take_while(|l| l.start < end)
             .flat_map(|l| {
-                l.spans.iter().map(|s| Span {
-                    start: s.start + l.start,
-                    end: s.end + l.start,
-                    kind: s.kind,
-                })
+                let first = l.spans.partition_point(|s| s.end + l.start <= start);
+                l.spans[first..]
+                    .iter()
+                    .take_while(move |s| s.start + l.start < end)
+                    .map(|s| Span {
+                        start: s.start + l.start,
+                        end: s.end + l.start,
+                        kind: s.kind,
+                    })
             })
             .filter(|s| s.end > start && s.start < end)
             .collect()
@@ -654,6 +658,7 @@ fn lex(text: &str, context: Context, mut state: State, next: Option<char>) -> (V
             break;
         }
         if s[i] == 34 || (context != Context::Json && s[i] == 39) {
+            let token_start = out.len();
             let q = s[i];
             i += 1;
             push(&mut out, begin, i, Kind::String);
@@ -666,7 +671,7 @@ fn lex(text: &str, context: Context, mut state: State, next: Option<char>) -> (V
                 .or(next.map(|c| c as u32))
                 == Some(58)
             {
-                out.retain(|p| p.start < begin as i32);
+                out.truncate(token_start);
                 push(&mut out, begin, i, Kind::Key);
             }
             continue;
@@ -865,6 +870,28 @@ mod tests {
         let edit = started.elapsed();
         assert!(cache.parsed_lines <= 3);
         eprintln!("Syntax benchmark: {} bytes, initial {initial:?}, one-line edit {edit:?}, {} lines lexed",text.len(),cache.parsed_lines);
+    }
+    #[test]
+    fn minified_json_scales_and_clips_spans() {
+        let text = format!(
+            "{{{}}}",
+            (0..25000)
+                .map(|i| format!("\"key{i}\":\"value{i}\""))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let mut cache = Cache::default();
+        let started = std::time::Instant::now();
+        cache.update(&text, Context::Json);
+        let all = cache.spans(0, i32::MAX);
+        assert_eq!(all.iter().filter(|s| s.kind == Kind::Key).count(), 25000);
+        let tail = cache.spans(text.len() as i32 - 100, text.len() as i32);
+        assert!(!tail.is_empty() && tail.len() < 30);
+        eprintln!(
+            "Minified JSON: {} bytes analyzed in {:?}",
+            text.len(),
+            started.elapsed()
+        );
     }
     #[test]
     fn theme_contrast() {

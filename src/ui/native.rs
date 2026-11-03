@@ -610,7 +610,7 @@ pub unsafe fn file_dialog(
 
 // RichEdit definitions are deliberately kept at this FFI boundary.
 #[repr(C)]
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Range {
     pub start: i32,
     pub end: i32,
@@ -718,6 +718,49 @@ pub unsafe fn range(hwnd: HWND) -> Range {
 pub unsafe fn set_range(hwnd: HWND, r: Range) {
     SendMessageW(hwnd, 0x437, 0, &r as *const _ as isize);
 }
+pub unsafe fn can_paste(hwnd: HWND, plain: bool) -> bool {
+    // EM_CANPASTE: 0 chooses the best available format, 13 is CF_UNICODETEXT.
+    SendMessageW(hwnd, 0x432, if plain { 13 } else { 0 }, 0) != 0
+}
+pub unsafe fn paste_plain(hwnd: HWND, face: &str, points: i32) -> bool {
+    if !can_paste(hwnd, true) {
+        return false;
+    }
+    SendMessageW(hwnd, 0x458, 0, 0); // EM_STOPGROUPTYPING
+    let Some(group) = super::syntax::EditCollection::new(hwnd) else {
+        return false;
+    };
+    let before = range(hwnd);
+    SendMessageW(hwnd, 0x440, 13, 0); // EM_PASTESPECIAL, CF_UNICODETEXT
+    let after = range(hwnd);
+    if after.end > before.start {
+        set_range(
+            hwnd,
+            Range {
+                start: before.start,
+                end: after.end,
+            },
+        );
+        let mut cf: CharFormat = zeroed();
+        cf.size = size_of::<CharFormat>() as u32;
+        // Face/size/charset, foreground/background, offset, weight/spacing/
+        // kerning/underline and all visual effects (including inherited marks).
+        cf.mask = 0xfcf37fff;
+        cf.effects = 0x04000000; // CFE_AUTOBACKCOLOR, explicit theme foreground
+        cf.color = palette().text;
+        cf.height = points * 20;
+        cf.charset = DEFAULT_CHARSET;
+        cf.weight = FW_NORMAL as u16;
+        for (a, b) in cf.face.iter_mut().take(31).zip(face.encode_utf16()) {
+            *a = b;
+        }
+        SendMessageW(hwnd, 0x444, 1, &cf as *const _ as isize);
+        set_range(hwnd, after);
+    }
+    drop(group);
+    SendMessageW(hwnd, 0x458, 0, 0);
+    true
+}
 pub unsafe fn format(hwnd: HWND, color: Option<u32>) {
     let mut cf: CharFormat = zeroed();
     cf.size = size_of::<CharFormat>() as u32;
@@ -746,7 +789,7 @@ pub fn logical_highlight(color: u32) -> u32 {
         .map(|p| p.0)
         .unwrap_or(color)
 }
-fn themed_highlight(color: u32) -> u32 {
+pub(super) fn themed_highlight(color: u32) -> u32 {
     let logical = logical_highlight(color);
     let displayed = if DARK.get() {
         HIGHLIGHT_PAIRS
