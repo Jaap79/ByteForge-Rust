@@ -80,6 +80,7 @@ pub fn command_paths(args: &[OsString]) -> Result<Vec<PathBuf>, String> {
                 "--ui-self-test",
                 "--verify-recovery",
                 "--verify-explorer",
+                "--verify-update",
                 "--profile-syntax",
                 "--profile-input",
             ]

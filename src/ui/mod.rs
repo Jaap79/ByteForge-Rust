@@ -36,8 +36,8 @@ const COPY: u16 = 213;
 const PASTE: u16 = 214;
 const SELECT_ALL: u16 = 215;
 const PASTE_PLAIN: u16 = 216;
-const PASTE_LABEL: &str = "Plakken &met opmaak\tCtrl+V";
-const PASTE_PLAIN_LABEL: &str = "Plakken &zonder opmaak\tCtrl+Shift+V";
+const PASTE_LABEL: &str = "Paste &with formatting\tCtrl+V";
+const PASTE_PLAIN_LABEL: &str = "Paste with&out formatting\tCtrl+Shift+V";
 const FIND: u16 = 220;
 const FIND_ALL: u16 = 221;
 const FIND_NEXT: u16 = 222;
@@ -69,6 +69,10 @@ const RECOVERY: u16 = 281;
 const ERASE_RECOVERY: u16 = 282;
 const UPDATE: u16 = 283;
 const ABOUT: u16 = 284;
+const GITHUB: u16 = 285;
+const TAB_TOP: i32 = 4;
+const TAB_GAP: i32 = 4;
+const STATUS_HEIGHT: i32 = 30;
 const NEXT_TAB: u16 = 290;
 const PREV_TAB: u16 = 291;
 const MOVE_LEFT: u16 = 292;
@@ -153,7 +157,7 @@ struct App {
     last_snapshot: Vec<u8>,
     last_error: String,
     note: String,
-    update: Option<mpsc::Receiver<Result<String, String>>>,
+    update: Option<mpsc::Receiver<Result<byteforge_rust::update::Check, String>>>,
     _lock: fs::File,
     next_control: u16,
 }
@@ -169,7 +173,8 @@ pub fn run() {
         };
         let qa = option("--ui-self-test")
             .or_else(|| option("--verify-recovery"))
-            .or_else(|| option("--verify-explorer"));
+            .or_else(|| option("--verify-explorer"))
+            .or_else(|| option("--verify-update"));
         let qa = qa.or_else(|| option("--profile-syntax"));
         let dir = option("--session-dir").unwrap_or_else(|| {
             qa.as_ref()
@@ -237,7 +242,7 @@ pub fn run() {
         let hwnd = CreateWindowExW(
             WS_EX_ACCEPTFILES,
             class.as_ptr(),
-            wide("ByteForge Rust 1.2.2").as_ptr(),
+            wide(concat!("ByteForge Rust ", env!("CARGO_PKG_VERSION"))).as_ptr(),
             WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -1027,7 +1032,7 @@ impl App {
             BS_OWNERDRAW as u32 | WS_TABSTOP | WS_CLIPSIBLINGS,
         );
         SendMessageW(tabs, TCM_SETITEMSIZE, 0, ((30 << 16) | 180) as isize);
-        let status = child(hwnd, "STATIC", "Ready", 401, SS_LEFT);
+        let status = child(hwnd, "STATIC", "Ready", 401, SS_LEFT | SS_CENTERIMAGE);
         let hex = child(
             hwnd,
             "RICHEDIT50W",
@@ -1434,15 +1439,41 @@ impl App {
                 );
             }
         }
+        self.poll_update();
+    }
+    unsafe fn poll_update(&mut self) {
         if let Some(receiver) = self.update.as_ref() {
-            if let Ok(result) = receiver.try_recv() {
+            let result = match receiver.try_recv() {
+                Ok(result) => Some(result),
+                Err(mpsc::TryRecvError::Disconnected) => Some(Err(
+                    "Update-check worker stopped before returning a result.".into(),
+                )),
+                Err(mpsc::TryRecvError::Empty) => None,
+            };
+            if let Some(result) = result {
                 self.update = None;
-                match result {
-                    Ok(v) => {
-                        prompt(self.hwnd,"Upstream version",&format!("Rust edition: 1.2.2\nFASM upstream: {v}\n\nThis is the original FASM feed, not an update channel for this Rust edition.\nhttps://github.com/Jaap79/ByteForge"),None,&["OK"]);
+                let message = match result {
+                    Ok(check) => {
+                        self.note = match check.status {
+                            byteforge_rust::update::Status::Current => {
+                                "Rust version is up to date".into()
+                            }
+                            byteforge_rust::update::Status::Available => {
+                                format!("Rust {} is available", check.latest)
+                            }
+                            byteforge_rust::update::Status::Ahead => {
+                                "Local Rust build is ahead of GitHub".into()
+                            }
+                        };
+                        check.message()
                     }
-                    Err(e) => error(self.hwnd, &e),
-                }
+                    Err(e) => {
+                        self.note = "Update check failed".into();
+                        format!("The latest ByteForge Rust version could not be verified.\n\n{e}\n\nNo files were downloaded or changed.")
+                    }
+                };
+                self.update_title();
+                prompt_repository(self.hwnd, "ByteForge Rust — updates", &message, &["OK"]);
             }
         }
     }
@@ -1457,9 +1488,10 @@ impl App {
         set_text(
             self.hwnd,
             &format!(
-                "{}{} — ByteForge Rust 1.2.2",
+                "{}{} — ByteForge Rust {}",
                 if tab.doc.dirty { "* " } else { "" },
-                path
+                path,
+                env!("CARGO_PKG_VERSION")
             ),
         );
         for (i, t) in self.documents.iter().enumerate() {
@@ -1504,7 +1536,7 @@ impl App {
         let width = r.right.max(0);
         let height = r.bottom.max(0);
         let s = |n| self.scale(n);
-        MoveWindow(self.tabs, 0, 0, (width - s(40)).max(0), s(36), 1);
+        MoveWindow(self.tabs, 0, s(TAB_TOP), (width - s(40)).max(0), s(36), 1);
         SendMessageW(
             self.tabs,
             TCM_SETITEMSIZE,
@@ -1529,7 +1561,14 @@ impl App {
         } else {
             (last.right + s(4)).min((width - s(36)).max(0))
         };
-        MoveWindow(self.new_tab, plus_x, s(2), s(32).min(width), s(30), 1);
+        MoveWindow(
+            self.new_tab,
+            plus_x,
+            s(TAB_TOP + 2),
+            s(32).min(width),
+            s(30),
+            1,
+        );
         SetWindowPos(
             self.new_tab,
             HWND_TOP,
@@ -1539,8 +1578,16 @@ impl App {
             0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
         );
-        MoveWindow(self.status, 0, (height - s(26)).max(0), width, s(26), 1);
-        let top = if self.search_visible { s(112) } else { s(36) };
+        MoveWindow(
+            self.status,
+            0,
+            (height - s(STATUS_HEIGHT)).max(0),
+            width,
+            s(STATUS_HEIGHT).min(height),
+            1,
+        );
+        let extra_top = TAB_TOP + TAB_GAP;
+        let top = s(if self.search_visible { 112 } else { 36 } + extra_top);
         if self.search_visible {
             let positions = [
                 (self.search, 8, 44, 42, 24),
@@ -1562,17 +1609,24 @@ impl App {
                 ),
             ];
             for (h, x, y, w, ht) in positions {
-                MoveWindow(h, s(x), s(y), s(w).min((width - s(x) - 4).max(0)), s(ht), 1);
+                MoveWindow(
+                    h,
+                    s(x),
+                    s(y + extra_top),
+                    s(w).min((width - s(x) - 4).max(0)),
+                    s(ht),
+                    1,
+                );
             }
         }
-        let available = (height - s(26) - top).max(0);
+        let available = (height - s(STATUS_HEIGHT) - top).max(0);
         let result_h = if self.search_visible && !self.hits.is_empty() {
             s(150).min(available / 3)
         } else {
             0
         };
         ShowWindow(self.results, if result_h > 0 { SW_SHOW } else { SW_HIDE });
-        let bottom = (height - s(26) - result_h).max(top);
+        let bottom = (height - s(STATUS_HEIGHT) - result_h).max(top);
         if result_h > 0 {
             MoveWindow(self.results, 0, bottom, width, result_h, 1);
         }
@@ -2530,14 +2584,15 @@ impl App {
                     let (tx, rx) = mpsc::channel();
                     self.update = Some(rx);
                     std::thread::spawn(move || {
-                        let _ = tx.send(platform::upstream_version());
+                        let _ = tx.send(platform::latest_version());
                     });
-                    self.note = "Checking FASM upstream…".into();
+                    self.note = "Checking ByteForge Rust on GitHub…".into();
                 }
             }
             ABOUT => {
-                prompt(self.hwnd,"About ByteForge Rust","ByteForge Rust 1.2.2\nNative Win32 / RichEdit — Rust edition\nForked from ByteForge 1.0.0.10 (a401721).\n\nDraggable tabs, per-tab syntax contexts, cross-tab search and recovery.\nRecovery stores readable text in your local profile.\n\nBugs / security: jaapengel79@proton.me",None,&["OK"]);
+                prompt_repository(self.hwnd,"About ByteForge Rust",&format!("ByteForge Rust {}\nNative Win32 / RichEdit — Rust edition\nForked from ByteForge 1.0.0.10 (a401721).\n\nDraggable tabs, per-tab syntax contexts, cross-tab search and recovery.\nRecovery stores readable text in your local profile.\n\nBugs / security: jaapengel79@proton.me",env!("CARGO_PKG_VERSION")),&["OK"]);
             }
+            GITHUB => platform::open_repository(self.hwnd),
             423 | 424 => self.invalidate_results(),
             _ => {}
         }
@@ -2546,6 +2601,16 @@ impl App {
         self.update_title();
     }
     unsafe fn menu_state(&self) {
+        EnableMenuItem(
+            self.menus.root,
+            UPDATE as u32,
+            MF_BYCOMMAND
+                | if self.update.is_some() {
+                    MF_GRAYED
+                } else {
+                    MF_ENABLED
+                },
+        );
         self.menus.check(DARK_MODE, DARK.get());
         self.menus.check(WRAP, self.documents[self.active].doc.wrap);
         self.menus.check(RECOVERY, self.recovery);
@@ -2775,7 +2840,8 @@ unsafe fn make_menus() -> Menus {
         (
             "&Help",
             vec![
-                (UPDATE, "Check FASM &upstream…\tCtrl+U"),
+                (UPDATE, "Check for &updates…\tCtrl+U"),
+                (GITHUB, "&GitHub repository…\tCtrl+Shift+U"),
                 (ABOUT, "&About ByteForge Rust\tF1"),
             ],
         ),
@@ -2905,6 +2971,7 @@ fn accelerators() -> Vec<ACCEL> {
         (ca, b'P' as u16, RECOVERY),
         (ca, VK_DELETE, ERASE_RECOVERY),
         (ctrl, b'U' as u16, UPDATE),
+        (shift, b'U' as u16, GITHUB),
         (FVIRTKEY, VK_F1, ABOUT),
         (ctrl, VK_TAB, NEXT_TAB),
         (shift, VK_TAB, PREV_TAB),

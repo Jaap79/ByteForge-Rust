@@ -8,7 +8,7 @@ Fork baseline: ByteForge FASM 1.0.0.10, commit a401721. Rust edition 1.1.0 targe
 
 The UI thread owns `App` through a thread-local RefCell. Reentrant native notifications use `try_borrow_mut`; paint/menu helpers and control subclasses can operate independently. Programmatic edits explicitly update capture state because reentrant EN_CHANGE is suppressed. User EN_CHANGE marks a tab for capture. UTF-16 CP positions are used at the FFI boundary; document paragraphs use one LF, matching RichEdit's one paragraph CP. Search line/column calculation uses document text, independent of wrap layout.
 
-`native.rs` is the raw FFI/theme/dialog boundary. `ui/mod.rs` owns document commands, tab/search presentation and the Win32 message loop. `platform.rs` only performs the explicitly requested FASM upstream version query on a background thread. No network action occurs on startup.
+`native.rs` is the raw FFI/theme/dialog boundary. `ui/mod.rs` owns document commands, tab/search presentation and the Win32 message loop. `platform.rs` performs the explicitly requested Rust update query on a background thread and opens only the fixed GitHub repository URL in the default browser. No network action occurs on startup.
 
 ## Persistence
 
@@ -51,5 +51,13 @@ The deferred main-window handler opens files through the existing `App::open` im
 `src/instance.rs` owns endpoint lookup, bounded message encoding/decoding, relative-path resolution and the pending queue. `tests/explorer-open.ps1` starts actual independent executable processes, verifies handoff/exits and then forcibly restarts each private workspace to inspect restored live editor contents. This tests the Explorer-style process-launch path without changing the machine's associations or touching user sessions. API references: [WM_COPYDATA lifetime/copying](https://learn.microsoft.com/en-us/windows/win32/dataxchg/wm-copydata), [bounded SendMessageTimeout](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendmessagetimeoutw), [foreground permission](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-allowsetforegroundwindow).
 
 ## Tests
+
+### Manual update checks and spacing (1.2.3)
+
+The tab strip's top and bottom padding each increase by 4 logical pixels, preserving its existing tab-item height, plus target and overflow layout. Find/replace controls move with that offset. The status STATIC uses a 30-logical-pixel height and `SS_CENTERIMAGE`; editor/results/hex bounds reserve that height. Existing palette brushes paint all gaps without extra system borders.
+
+Help/Ctrl+U starts one worker, disables duplicate checks and polls its bounded result without blocking the message loop. WinHTTP reads the public `raw.githubusercontent.com/Jaap79/ByteForge-Rust/main/Cargo.toml` over certificate-verified HTTPS with automatic system-proxy selection, 5-second phase timeouts, a 15-second elapsed check between reads and a 32 KiB response cap. Redirects are refused. `src/update.rs` parses only the simple quoted `[package]` version and compares numeric components; dependency versions, malformed/duplicate versions and prerelease syntax are rejected. Three/four-component numeric versions normalize to four components for comparison. Failed or disconnected workers never imply the app is current. The reference is the distributed `main` version, not a GitHub Release/prerelease channel.
+
+About/update dialogs expose a native owner-drawn, tab-focusable link button with underlined theme-readable text, hand cursor and focus indication. The only navigation target is the compiled-in GitHub repository URL; response text cannot choose a URL or execute a command. Opening the browser is user-initiated; no installer, token, new dependency or separate public feed is needed. API reference: [ShellExecuteW](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shellexecutew).
 
 Unit tests cover Unicode/encoding/EOL round trips, strict input rejection, session corruption/truncation, backup fallback, known hash vectors, atomic save and external-file conflicts. The storage test locks the destination and proves a failed replacement neither truncates it nor leaves temporary files. Native tests cover actual RichEdit selection/highlight/zoom, tab settings, search in hidden wrapped tabs, save, undo/redo, replacing, snapshots and process-termination/restart recovery. GUI QA also inspects dark/light native chrome, menus, search, tabs and dialogs.

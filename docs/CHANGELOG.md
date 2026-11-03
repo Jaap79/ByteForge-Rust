@@ -1,5 +1,13 @@
 # Changelog
 
+## Rust edition 1.2.3
+
+- Add 4 logical pixels of breathing room above/below the tab strip; move find/replace controls consistently. Increase the status bar to 30 logical pixels and vertically center its text, retaining themed surfaces without white separators.
+- Rename the two paste actions to **Paste with formatting** and **Paste without formatting** in Edit and the editor context menu; shortcuts are unchanged.
+- Replace the FASM upstream check with **Help → Check for updates** (Ctrl+U) against the public Rust repository's package version on `main`. Compare numeric versions, distinguish current/newer/local-ahead and failure states, reject malformed responses and duplicate requests, and retain background-only/manual networking.
+- Add a clickable/keyboard-focusable GitHub link to About and update dialogs, plus **Help → GitHub repository** (Ctrl+Shift+U). No automatic download/installation or added runtime dependency.
+- Add offline comparison/response/UI regression tests and an explicit live GitHub test. Align the legacy version.json metadata with Cargo/PE versioning.
+
 ## Rust edition 1.2.2
 
 - Add **Plakken met opmaak** (Ctrl+V) and **Plakken zonder opmaak** (Ctrl+Shift+V) to Edit and the editor context menu. Plain paste uses Unicode text and the current tab font/theme, strips source and inherited character styling/marks, and groups insertion/normalization into one undo action.

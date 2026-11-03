@@ -1,6 +1,24 @@
 use super::*;
 thread_local! {pub static OUTPUT:RefCell<Option<PathBuf>>=const{RefCell::new(None)};}
 thread_local! {static RECEIVED:std::cell::Cell<u16>=const{std::cell::Cell::new(0)};}
+thread_local! {static REPOSITORY_LINK_SEEN:std::cell::Cell<bool>=const{std::cell::Cell::new(false)};}
+thread_local! {static UPDATE_MESSAGE:RefCell<String>=const{RefCell::new(String::new())};}
+unsafe extern "system" fn inspect_repository_prompt(hwnd: HWND, _data: isize) -> i32 {
+    let link = GetDlgItem(hwnd, 112);
+    if !link.is_null() && text(link) == platform::REPOSITORY {
+        REPOSITORY_LINK_SEEN.set(GetWindowLongPtrW(link, GWL_STYLE) & WS_TABSTOP as isize != 0);
+        UPDATE_MESSAGE.with(|m| *m.borrow_mut() = text(GetDlgItem(hwnd, 110)));
+        PostMessageW(hwnd, WM_COMMAND, 1, 0);
+    }
+    1
+}
+unsafe extern "system" fn check_repository_prompt(_hwnd: HWND, _msg: u32, _id: usize, _time: u32) {
+    EnumThreadWindows(
+        windows_sys::Win32::System::Threading::GetCurrentThreadId(),
+        Some(inspect_repository_prompt),
+        0,
+    );
+}
 #[link(name = "ole32")]
 extern "system" {
     fn OleInitialize(reserved: *mut std::ffi::c_void) -> i32;
@@ -229,7 +247,9 @@ pub unsafe fn run(app: &mut App) {
     let output = OUTPUT.with(|o| o.borrow().clone()).unwrap();
     let _ = fs::create_dir_all(&output);
     let verify = std::env::args_os().any(|a| a == "--verify-recovery");
-    let result = if std::env::args_os().any(|a| a == "--profile-syntax") {
+    let result = if std::env::args_os().any(|a| a == "--verify-update") {
+        verify_update(app, &output)
+    } else if std::env::args_os().any(|a| a == "--profile-syntax") {
         profile_syntax(app, &output)
     } else if std::env::args_os().any(|a| a == "--verify-explorer") {
         verify_explorer(app, &output)
@@ -246,6 +266,91 @@ pub unsafe fn run(app: &mut App) {
     if !std::env::args_os().any(|a| a == "--crash-fixture") {
         DestroyWindow(app.hwnd);
     }
+}
+unsafe fn verify_update(app: &mut App, output: &Path) -> Result<usize, String> {
+    REPOSITORY_LINK_SEEN.set(false);
+    UPDATE_MESSAGE.with(|m| m.borrow_mut().clear());
+    let timer = SetTimer(null_mut(), 0, 20, Some(check_repository_prompt));
+    app.command(UPDATE);
+    let started = std::time::Instant::now();
+    while app.update.is_some() && started.elapsed() < std::time::Duration::from_secs(35) {
+        app.poll_update();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    KillTimer(null_mut(), timer);
+    let message = UPDATE_MESSAGE.with(|m| m.borrow().clone());
+    fs::write(output.join("update.txt"), &message).map_err(|e| e.to_string())?;
+    if app.update.is_some() {
+        return Err("Live update check exceeded its test deadline.".into());
+    }
+    if app.note == "Update check failed" {
+        return Err(message);
+    }
+    if !REPOSITORY_LINK_SEEN.get() || !message.contains("GitHub (main):") {
+        return Err("Live update result did not expose the GitHub link and version.".into());
+    }
+    Ok(3)
+}
+unsafe fn exercise_update(app: &mut App) -> Result<Vec<String>, String> {
+    let mut checks = vec![];
+    let original_note = app.note.clone();
+    for (version, phrase) in [
+        (byteforge_rust::update::CURRENT, "is up to date"),
+        ("99.0.0", "newer ByteForge Rust version"),
+        ("0.0.1", "local build is newer"),
+    ] {
+        let body = format!("[package]\nversion = \"{version}\"\n");
+        let check = byteforge_rust::update::check_manifest(&body, byteforge_rust::update::CURRENT)?;
+        let (tx, rx) = mpsc::channel();
+        app.update = Some(rx);
+        app.menu_state();
+        if GetMenuState(app.menus.root, UPDATE as u32, MF_BYCOMMAND) & MF_GRAYED == 0 {
+            return Err("Busy update check was not disabled in Help.".into());
+        }
+        app.command(UPDATE);
+        tx.send(Ok(check)).map_err(|e| e.to_string())?;
+        REPOSITORY_LINK_SEEN.set(false);
+        let timer = SetTimer(null_mut(), 0, 20, Some(check_repository_prompt));
+        app.poll_update();
+        KillTimer(null_mut(), timer);
+        if app.update.is_some()
+            || !REPOSITORY_LINK_SEEN.get()
+            || !UPDATE_MESSAGE.with(|m| m.borrow().contains(phrase))
+        {
+            return Err(format!(
+                "Update dialog failed its {version} comparison/linked-result case."
+            ));
+        }
+        checks.push(format!(
+            "Update dialog reports {phrase} and exposes the GitHub link"
+        ));
+    }
+    for disconnected in [false, true] {
+        let (tx, rx) = mpsc::channel();
+        app.update = Some(rx);
+        if !disconnected {
+            tx.send(Err("Offline test: connection unavailable.".into()))
+                .map_err(|e| e.to_string())?;
+        }
+        drop(tx);
+        let timer = SetTimer(null_mut(), 0, 20, Some(check_repository_prompt));
+        app.poll_update();
+        KillTimer(null_mut(), timer);
+        if app.update.is_some()
+            || app.note != "Update check failed"
+            || UPDATE_MESSAGE.with(|m| m.borrow().contains("is up to date"))
+        {
+            return Err(
+                "Failed/disconnected update check falsely reported success or stayed busy.".into(),
+            );
+        }
+        checks.push(
+            "Failed/disconnected update checks clear busy state without claiming up to date".into(),
+        );
+    }
+    app.note = original_note;
+    app.update_title();
+    Ok(checks)
 }
 unsafe fn profile_syntax(app: &mut App, output: &Path) -> Result<usize, String> {
     let args: Vec<_> = std::env::args_os().collect();
@@ -460,6 +565,37 @@ unsafe fn exercise(app: &mut App, output: &Path) -> Result<usize, String> {
         };
     }
     check!(app.documents.len() == 1, "Starts with one scratch tab");
+    let mut origin = POINT { x: 0, y: 0 };
+    ClientToScreen(app.hwnd, &mut origin);
+    let tabs = window_rect(app.tabs);
+    let editor = window_rect(app.edit());
+    let status = window_rect(app.status);
+    check!(
+        tabs.top - origin.y == app.scale(4) && editor.top - tabs.bottom == app.scale(4),
+        "Menu/tabs and tabs/editor each have four extra logical pixels of space"
+    );
+    check!(
+        status.bottom - status.top == app.scale(30)
+            && editor.bottom == status.top
+            && GetWindowLongPtrW(app.status, GWL_STYLE) & SS_CENTERIMAGE as isize != 0,
+        "Status bar is thirty logical pixels high with vertically centered text and no layout seam"
+    );
+    check!(
+        app.menus.items.iter().any(|i| i.label == PASTE_LABEL)
+            && app.menus.items.iter().any(|i| i.label == PASTE_PLAIN_LABEL)
+            && PASTE_LABEL.starts_with("Paste &with formatting")
+            && PASTE_PLAIN_LABEL.starts_with("Paste with&out formatting"),
+        "Both main-menu paste labels are English and retain their shortcuts"
+    );
+    REPOSITORY_LINK_SEEN.set(false);
+    let prompt_timer = SetTimer(null_mut(), 0, 20, Some(check_repository_prompt));
+    app.command(ABOUT);
+    KillTimer(null_mut(), prompt_timer);
+    check!(
+        REPOSITORY_LINK_SEEN.get(),
+        "About dialog exposes a keyboard-focusable GitHub link"
+    );
+    checks.extend(exercise_update(app)?);
     set_raw(app.edit(), "alpha café 😀\nneedle first\nneedle again");
     app.documents[0].changed = true;
     app.capture(0);

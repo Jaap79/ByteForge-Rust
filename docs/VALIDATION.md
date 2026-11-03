@@ -1,6 +1,18 @@
-# Validation — ByteForge Rust 1.2.2
+# Validation — ByteForge Rust 1.2.3
 
-## Current 1.2.2 build — 3 November 2026
+## Current 1.2.3 build — 3 November 2026
+
+- Path: `dist/ByteForge-Rust.exe`; size: 592,896 bytes (579 KiB); Windows FileVersion/ProductVersion: `1.2.3.0`.
+- SHA-256: `B7EA8553E064CB6DE71594D4EBC08C59B241CB00F48D0160A9D5B822F21C1D0A`.
+- Format check, **21 unit/model/storage/update tests**, Clippy with warnings denied and optimized release build passed. New cases cover numeric ordering (including 1.2.10 vs 1.2.9), three/four-part equality, local-ahead builds, dependency-version exclusion, malformed/duplicate/oversized responses and actual Cargo version parsing.
+- **156 native UI checks** and **10 process-stop/restart checks** passed. New checks verify exact 4-logical-pixel menu/tab/editor gaps, a 30-logical-pixel vertically centered status bar with aligned editor bounds, English paste labels, keyboard-focusable GitHub links, current/newer/local-ahead update dialogs, busy-menu state, offline failure and disconnected-worker handling. Evidence: `output/qa-20261103-111802-674/`.
+- The actual manual background WinHTTP/GitHub path passed **three live checks**, reporting installed 1.2.3 vs GitHub main 1.2.2 as local-ahead (the new source was not yet pushed). Evidence: `output/update-20261103-111804-941/update.txt`, `result.txt`. No credentials, documents or automatic installation are involved.
+- Syntax rendering regression passed **155 / 47 native checks** for large long-row/minified JSON, about 41 / 85 ms initial decoration with formatting slices below 2 ms: `output/syntax-20261103-111805-511/`. Explorer multi-process handoff and restored live buffers passed **156 baseline**, **five primary** and **three isolated-workspace** checks: `output/explorer-20261103-111806-529/`.
+- At the user's explicit request, only `Jaap79/ByteForge-Rust` was changed from private to public; unauthenticated raw Cargo retrieval returned HTTP 200. The temporary separate public gist created earlier in this task was deleted after the user selected a public repository instead. The update checker reads the public Rust repository directly, not a second feed or the FASM project.
+- After the user closed ByteForge, the standard executable was replaced with the byte-identical tested build; the prior 1.2.2 executable is retained locally as an ignored backup. User recovery state/documents and associations were not changed. No Cargo/runtime dependency was added.
+- Computer Use verified the canonical executable in an empty isolated workspace: new spacing/status alignment, complete English paste menu labels, Help update/repository actions, a real update-result dialog in dark mode and the About link/dialog in light mode. Clicking the actual underlined link opened the ByteForge Rust GitHub page in Edge. Dark/light title bars, surfaces and link contrast retain the design-language palette with no new white seams. Separate 125%/150% monitor configurations were not exercised; dimensions are DPI-scaled and native geometry is asserted in the harness.
+
+## Previous 1.2.2 build — 3 November 2026
 
 - Path: `dist/ByteForge-Rust.exe`; size: 577,536 bytes (564 KiB); Windows FileVersion/ProductVersion: `1.2.2.0`.
 - SHA-256: `27355108D38DCFC11EE687661CAFB66E0F26A1D4A40E7B06C094EC6D151F6776`.

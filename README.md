@@ -1,10 +1,10 @@
-# ByteForge Rust 1.2.2
+# ByteForge Rust 1.2.3
 
 Native Windows text editor with colored tabs, independent tab settings, cross-tab search and session recovery. This is a separate Rust edition forked from ByteForge 1.0.0.10 at `a401721`; the original FASM repository is unchanged. Original source and binary are retained in `legacy/` and the Git history is preserved.
 
-Repository: [Jaap79/ByteForge-Rust](https://github.com/Jaap79/ByteForge-Rust). The current executable is included under `dist/`; this preview does not yet have a separate GitHub Release or automatic Rust update feed.
+Public repository: [Jaap79/ByteForge-Rust](https://github.com/Jaap79/ByteForge-Rust). The current executable is included under `dist/`. Help offers an explicit Rust-version check against `main`; there is no separate GitHub Release feed or automatic installation.
 
-Run **`dist/ByteForge-Rust.exe`** (1.2.2). Close any old instance once when upgrading so the executable can be replaced. One self-contained executable; only standard Windows DLLs are needed. No browser, WebView, .NET, PowerShell installation, sidecar grammar files or installed Rust runtime is required.
+Run **`dist/ByteForge-Rust.exe`** (1.2.3). Close any old instance once when upgrading so the executable can be replaced. One self-contained executable; only standard Windows DLLs are needed. No browser, WebView, .NET, PowerShell installation, sidecar grammar files or installed Rust runtime is required.
 
 ## Tabs and editing
 
@@ -18,7 +18,9 @@ UTF-8, UTF-8 BOM, UTF-16LE BOM and UTF-16BE BOM are supported. Encoding and CRLF
 
 Text follows the active theme after font changes: light in dark mode, dark in light mode. Highlight backgrounds have deeper shades in dark mode so light letters remain readable; the original logical highlight colors are retained in session storage.
 
-**Edit** and the editor's right-click menu offer **Plakken met opmaak** (Ctrl+V) and **Plakken zonder opmaak** (Ctrl+Shift+V). The first keeps available rich-text formatting. The second inserts only Unicode text, using the current tab's font/size and theme, without source or inherited character styles/highlights. Each paste is one undo/redo action. These remain plain-text documents: rich formatting is for the live editor, not RTF/HTML file saving; recovery retains the existing per-tab settings and manual highlight ranges, not arbitrary rich-text styles.
+The tab strip has 4 logical pixels of additional space above and below it. The status bar is 30 logical pixels high, with vertically centered text. These measurements scale with DPI and use the existing themed surfaces rather than system-white separators.
+
+**Edit** and the editor's right-click menu offer **Paste with formatting** (Ctrl+V) and **Paste without formatting** (Ctrl+Shift+V). The first keeps available rich-text formatting. The second inserts only Unicode text, using the current tab's font/size and theme, without source or inherited character styles/highlights. Each paste is one undo/redo action. These remain plain-text documents: rich formatting is for the live editor, not RTF/HTML file saving; recovery retains the existing per-tab settings and manual highlight ranges, not arbitrary rich-text styles.
 
 ## Syntax context — per tab
 
@@ -77,26 +79,27 @@ All menu actions show their shortcuts. Important mappings:
 | Hex left / right / below / close | Ctrl+Shift+L / R / B / X |
 | Checksums | Ctrl+K |
 | Session recovery / Clear recovery data | Ctrl+Alt+P / Ctrl+Alt+Delete |
-| Manual FASM upstream check / About | Ctrl+U / F1 |
+| Check Rust updates / GitHub repository / About | Ctrl+U / Ctrl+Shift+U / F1 |
 
-Ctrl+W now closes a tab; word wrap moved to Alt+Z. The manual upstream check explicitly reports the FASM feed; this Rust edition does not treat the FASM version as a Rust update. No automatic network requests or telemetry.
+Ctrl+W closes a tab; word wrap uses Alt+Z. **Help → Check for updates** reads the Rust package version from the public repository's `main/Cargo.toml` over HTTPS on a background thread. It compares numeric version components, reports current/newer/local-ahead results, and distinguishes network/HTTP/invalid-response errors from success. It does not check the FASM edition, request credentials, install updates or send document contents. **Help → GitHub repository**, About and update results expose a clickable, keyboard-focusable repository link. No automatic network requests or telemetry.
 
 ## Build and verify
 
-Rust Windows GNU toolchain; one pinned dependency, `windows-sys = 0.59.0`. `build.rs` embeds the geometric ByteForge-family icon, DPI manifest and Windows version resource without a resource compiler. Version: 1.2.2 / PE 1.2.2.0.
+Rust Windows GNU toolchain; one pinned dependency, `windows-sys = 0.59.0`. `build.rs` embeds the geometric ByteForge-family icon, DPI manifest and Windows version resource without a resource compiler. Version: 1.2.3 / PE 1.2.3.0.
 
 ```powershell
 .\scripts\build.ps1 -Test -Clippy
 .\tests\ui-smoke.ps1
 .\tests\explorer-open.ps1
 .\tests\syntax-performance.ps1
+.\tests\update-check.ps1 # Explicit live GitHub check; other tests are offline.
 ```
 
 For a side-by-side build while the default executable is running:
 
 ```powershell
-.\scripts\build.ps1 -Test -Clippy -Output dist\ByteForge-Rust-1.2.2.exe
-.\tests\ui-smoke.ps1 -Executable .\dist\ByteForge-Rust-1.2.2.exe
+.\scripts\build.ps1 -Test -Clippy -Output dist\ByteForge-Rust-1.2.3.exe
+.\tests\ui-smoke.ps1 -Executable .\dist\ByteForge-Rust-1.2.3.exe
 ```
 
 The build helper reuses the existing sibling `CSVcoder-Rust\.tooling` installation if present, or accepts `-ToolingRoot`; otherwise it uses Cargo on PATH. It changes only the current process environment. Dependencies must already be cached for its offline build; on a fresh toolchain run `cargo fetch --locked` once. With a normal configured toolchain, `cargo test --locked` and `cargo build --release --locked` work directly.

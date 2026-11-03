@@ -394,13 +394,64 @@ pub unsafe fn paint_control(msg: u32, wp: usize, _lp: isize) -> Option<isize> {
 
 struct PromptState {
     result: Cell<usize>,
+    repository_link: bool,
+}
+const REPOSITORY_LINK: u32 = 112;
+unsafe extern "system" fn link_proc(
+    hwnd: HWND,
+    msg: u32,
+    wp: usize,
+    lp: isize,
+    _id: usize,
+    _data: usize,
+) -> isize {
+    if msg == WM_SETCURSOR && lp as u16 as u32 == HTCLIENT {
+        SetCursor(LoadCursorW(null_mut(), IDC_HAND));
+        return 1;
+    }
+    windows_sys::Win32::UI::Shell::DefSubclassProc(hwnd, msg, wp, lp)
+}
+unsafe fn draw_repository_link(d: &DRAWITEMSTRUCT) -> isize {
+    FillRect(d.hDC, &d.rcItem, brush(1));
+    SetBkMode(d.hDC, TRANSPARENT as i32);
+    SetTextColor(d.hDC, if DARK.get() { ACCENT } else { palette().text });
+    let mut desc: LOGFONTW = zeroed();
+    GetObjectW(
+        ui_font(),
+        size_of::<LOGFONTW>() as i32,
+        &mut desc as *mut _ as _,
+    );
+    desc.lfUnderline = 1;
+    let font = CreateFontIndirectW(&desc);
+    let old = SelectObject(d.hDC, font);
+    let mut r = d.rcItem;
+    DrawTextW(
+        d.hDC,
+        wide(super::platform::REPOSITORY).as_ptr(),
+        -1,
+        &mut r,
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX,
+    );
+    SelectObject(d.hDC, old);
+    DeleteObject(font);
+    if d.itemState & ODS_FOCUS != 0 {
+        DrawFocusRect(d.hDC, &d.rcItem);
+    }
+    1
 }
 unsafe extern "system" fn prompt_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize) -> isize {
     if let Some(v) = paint_control(msg, wp, lp) {
         return v;
     }
     match msg {
-        WM_DRAWITEM => super::draw_button(&*(lp as *const DRAWITEMSTRUCT)),
+        WM_DRAWITEM => {
+            let d = &*(lp as *const DRAWITEMSTRUCT);
+            if d.CtlID == REPOSITORY_LINK {
+                draw_repository_link(d)
+            } else {
+                super::draw_button(d)
+            }
+        }
         WM_ERASEBKGND => {
             let mut r = zeroed();
             GetClientRect(hwnd, &mut r);
@@ -409,6 +460,13 @@ unsafe extern "system" fn prompt_proc(hwnd: HWND, msg: u32, wp: usize, lp: isize
         }
         WM_CLOSE | WM_COMMAND => {
             let choice = if msg == WM_CLOSE { 0 } else { wp & 65535 };
+            if msg == WM_COMMAND && choice == REPOSITORY_LINK as usize {
+                let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const PromptState;
+                if !ptr.is_null() && (*ptr).repository_link {
+                    super::platform::open_repository(hwnd);
+                }
+                return 0;
+            }
             if msg == WM_CLOSE || (1..=3).contains(&choice) {
                 let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const PromptState;
                 if !ptr.is_null() {
@@ -432,6 +490,24 @@ pub unsafe fn prompt(
     initial: Option<&str>,
     buttons: &[&str],
 ) -> Option<(usize, String)> {
+    prompt_impl(owner, title, label, initial, buttons, false)
+}
+pub unsafe fn prompt_repository(
+    owner: HWND,
+    title: &str,
+    label: &str,
+    buttons: &[&str],
+) -> Option<(usize, String)> {
+    prompt_impl(owner, title, label, None, buttons, true)
+}
+unsafe fn prompt_impl(
+    owner: HWND,
+    title: &str,
+    label: &str,
+    initial: Option<&str>,
+    buttons: &[&str],
+    repository_link: bool,
+) -> Option<(usize, String)> {
     let instance = GetModuleHandleW(null());
     let class = wide("ByteForgeRustPrompt");
     let wc = WNDCLASSW {
@@ -452,7 +528,9 @@ pub unsafe fn prompt(
         .map(|line| line.chars().count().max(1).div_ceil(80))
         .sum();
     let label_height = (lines as i32 * 18 + 8).clamp(48, 260);
-    let height = s(label_height + if initial.is_some() { 150 } else { 110 });
+    let height = s(label_height
+        + if initial.is_some() { 150 } else { 110 }
+        + if repository_link { 36 } else { 0 });
     let hwnd = CreateWindowExW(
         WS_EX_DLGMODALFRAME,
         class.as_ptr(),
@@ -472,11 +550,23 @@ pub unsafe fn prompt(
     }
     let state = PromptState {
         result: Cell::new(0),
+        repository_link,
     };
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, &state as *const _ as isize);
     title_theme(hwnd);
     let lbl = child(hwnd, "STATIC", label, 110, SS_LEFT);
     MoveWindow(lbl, s(16), s(16), width - s(48), s(label_height), 1);
+    if repository_link {
+        let link = child(
+            hwnd,
+            "BUTTON",
+            super::platform::REPOSITORY,
+            REPOSITORY_LINK as u16,
+            WS_TABSTOP | BS_OWNERDRAW as u32,
+        );
+        windows_sys::Win32::UI::Shell::SetWindowSubclass(link, Some(link_proc), 1, 0);
+        MoveWindow(link, s(16), s(label_height + 20), width - s(48), s(28), 1);
+    }
     let edit = if let Some(value) = initial {
         let h = child(
             hwnd,
